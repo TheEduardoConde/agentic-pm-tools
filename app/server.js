@@ -401,7 +401,9 @@ export function buildBacklogItemMarkdown(input, { id, number, date }) {
 }
 
 async function atomicWriteFile(filePath, content) {
-  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const directory = path.dirname(filePath);
+  const basename = path.basename(filePath).replace(/^\.+/, '') || 'file';
+  const tempPath = path.join(directory, `${basename}.${process.pid}.${Date.now()}.tmp`);
   await fs.writeFile(tempPath, content, 'utf8');
   await fs.rename(tempPath, filePath);
 }
