@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PM Tools</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="./src/styles.css">
+  </head>
+  <body>
+    <main id="app" class="app-shell">
+      <aside class="nav-rail" aria-label="PM Tools navigation">
+        <div class="nav-brand">
+          <span class="brand-mark">PM</span>
+          <strong>PM Tools</strong>
+        </div>
+        <button class="nav-link active" data-view-target="backlog" type="button">Backlog Dashboard</button>
+        <button class="nav-link" data-view-target="releases" type="button">Releases</button>
+        <button class="nav-link" data-view-target="validation" type="button">Validation</button>
+        <button class="nav-link" data-view-target="prompts" type="button">Prompts</button>
+        <button class="nav-link" data-view-target="settings" type="button">Settings</button>
+      </aside>
+
+      <section class="shell">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">Portable Project Management</p>
+            <h1 id="viewTitle">Backlog Dashboard</h1>
+          </div>
+          <div class="header-actions">
+            <button id="addItemBtn" type="button">Add Backlog Item</button>
+            <button id="refreshBtn" type="button" class="secondary">Refresh</button>
+          </div>
+        </header>
+
+        <section class="view-section active" data-view="backlog">
+          <section class="summary-grid dashboard-cards" aria-label="Project health">
+            <div><span class="summary-label">Total Items</span><strong id="itemCount">0</strong></div>
+            <div><span class="summary-label">Active</span><strong id="activeCount">0</strong></div>
+            <div><span class="summary-label">Completed</span><strong id="completedCount">0</strong></div>
+            <div><span class="summary-label">Blocked</span><strong id="blockedCount">0</strong></div>
+            <div><span class="summary-label">Clarifying</span><strong id="clarifyingCount">0</strong></div>
+            <div><span class="summary-label">Ready / Deploy Ready</span><strong id="deployReadyCount">0</strong></div>
+            <div><span class="summary-label">New</span><strong id="newCount">0</strong></div>
+            <div><span class="summary-label">In Development</span><strong id="developmentCount">0</strong></div>
+            <div><span class="summary-label">Ready for Testing</span><strong id="readyTestingCount">0</strong></div>
+            <div><span class="summary-label">Passed Testing</span><strong id="passedTestingCount">0</strong></div>
+          </section>
+
+          <section class="dashboard-grid">
+            <article class="dashboard-panel">
+              <h2>Needs Attention</h2>
+              <div id="needsAttention" class="attention-list"></div>
+            </article>
+            <article class="dashboard-panel">
+              <h2>Ready for Human Testing</h2>
+              <div id="readyForTesting" class="attention-list"></div>
+            </article>
+            <article class="dashboard-panel">
+              <h2>Ready to Deploy</h2>
+              <div id="readyToDeploy" class="attention-list"></div>
+            </article>
+            <article class="dashboard-panel">
+              <h2>Recent Activity</h2>
+              <div id="recentActivity" class="attention-list"></div>
+            </article>
+          </section>
+
+          <section class="dashboard-grid" aria-label="Backlog summaries">
+            <article class="dashboard-panel">
+              <h2>Release Readiness</h2>
+              <div id="releaseSummary" class="summary-pills"></div>
+            </article>
+            <article class="dashboard-panel">
+              <h2>By Status</h2>
+              <div id="statusSummary" class="grouped-pills"></div>
+            </article>
+            <article class="dashboard-panel">
+              <h2>By Priority</h2>
+              <div id="prioritySummary" class="summary-pills"></div>
+            </article>
+            <article class="dashboard-panel">
+              <h2>By Type</h2>
+              <div id="typeSummary" class="summary-pills"></div>
+            </article>
+          </section>
+
+
+          <section class="board-section">
+            <div class="section-header">
+              <h2>Lifecycle Board</h2>
+              <span id="loadedAt">Loading...</span>
+            </div>
+            <div id="statusBoard" class="status-board"></div>
+          </section>
+
+          <section class="filters" aria-label="Backlog filters">
+            <label>Search<input id="searchFilter" type="search" placeholder="ID, title, status, release..."></label>
+            <label>Status<select id="statusFilter"><option value="">All statuses</option></select></label>
+            <label>Priority<select id="priorityFilter"><option value="">All priorities</option></select></label>
+            <label>Folder<select id="folderFilter"><option value="">All folders</option></select></label>
+            <label>Sort<select id="sortSelect"><option value="updated">Updated</option><option value="priority">Priority</option><option value="status">Status</option><option value="release">Release</option></select></label>
+          </section>
+
+          <section class="action-bar">
+            <span id="selectionCount">0 selected</span>
+            <button id="goReleasesBtn" type="button" class="secondary">Assign in Releases</button>
+          </section>
+
+          <section class="table-section">
+            <div class="table-header">
+              <h2>Backlog Manager</h2>
+              <span id="visibleCount">0 shown</span>
+            </div>
+            <div id="error" class="error" hidden></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Select</th><th data-sort="id">ID</th><th data-sort="type">Type</th><th data-sort="title">Title</th><th data-sort="status">Status</th><th data-sort="priority">Priority</th><th data-sort="effort">Effort</th><th data-sort="release">Release</th><th data-sort="updated">Updated</th><th data-sort="folder">Folder</th><th>Open</th>
+                  </tr>
+                </thead>
+                <tbody id="backlogRows"><tr><td colspan="11" class="empty">Loading backlog...</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view-section" data-view="releases">
+          <section class="release-workspace" aria-label="Release planner">
+            <div class="release-toolbar">
+              <div>
+                <h2>Release Workspace</h2>
+                <p>Select a release to inspect readiness, assign selected backlog items, and generate prompts or checklists.</p>
+              </div>
+              <button id="refreshReleasesBtn" type="button" class="secondary">Refresh Releases</button>
+            </div>
+            <div class="release-assign-row">
+              <label>Search Releases<input id="releaseSearch" type="search" placeholder="Search by release ID or status"></label>
+              <label>New Release Version<input id="newReleaseInput" type="text" placeholder="v0.2.0"></label>
+              <button id="createReleaseBtn" type="button">Create Release</button>
+            </div>
+            <div class="release-assign-row">
+              <label>Selected Release<input id="releaseInput" type="text" placeholder="v0.1.0 or Unassigned" value="Unassigned"></label>
+              <button id="assignReleaseBtn" type="button">Assign Selected Backlog Items</button>
+            </div>
+            <div id="releaseMessage" class="create-message" hidden></div>
+            <div class="release-layout">
+              <aside id="releaseList" class="release-list">Loading releases...</aside>
+              <article id="releaseDetail" class="release-detail-panel">Select a release to view details.</article>
+            </div>
+          </section>
+        </section>
+
+        <section class="view-section" data-view="validation">
+          <section class="validation-section" aria-label="Backlog validation">
+            <div class="validation-header">
+              <div><h2>Validation</h2><p>Manual validation with read-only findings. Safe-fix buttons are future scope.</p></div>
+              <button id="validateBtn" type="button">Validate Backlog</button>
+            </div>
+            <div id="validationReminder" class="validation-reminder" hidden></div>
+            <div class="validation-meta"><span>Last validation:</span><strong id="lastValidation">Loading...</strong></div>
+            <div id="validationResults" class="validation-results" hidden></div>
+          </section>
+        </section>
+
+        <section class="view-section" data-view="prompts">
+          <section class="prompt-workspace" aria-label="Prompt workspace">
+            <div class="prompt-header">
+              <div><h2>Prompt Workspace</h2><p>Generate implementation, release, human QA, and version-control prompts without performing version-control actions.</p></div>
+              <button id="copyPromptBtn" type="button" class="secondary">Copy Output</button>
+            </div>
+            <div class="prompt-controls">
+              <label>Prompt Type
+                <select id="promptType">
+                  <option value="item">Item Development Prompt</option>
+                  <option value="release">Release Development Prompt</option>
+                  <option value="checklist">Human Testing Checklist</option>
+                  <option value="version-control">Version Control Prompt</option>
+                </select>
+              </label>
+              <label>Backlog Item<select id="promptItemSelect"></select></label>
+              <label>Release<select id="promptReleaseSelect"></select></label>
+              <button id="generatePromptBtn" type="button">Generate</button>
+              <button id="savePromptBtn" type="button" class="secondary">Save Where Applicable</button>
+            </div>
+            <div class="prompt-help">
+              <strong>How to use this prompt</strong>
+              <span>Generate the prompt, review the preview, copy it into Codex, and save it back to the item or release file only when useful.</span>
+              <span>Git/version-control actions are never performed by this app.</span>
+            </div>
+            <div class="prompt-meta"><span id="promptMeta">No prompt generated yet.</span></div>
+            <pre id="promptOutput" class="prompt-output">Choose a prompt type and source to preview output here.</pre>
+          </section>
+        </section>
+
+        <section class="view-section" data-view="settings">
+          <section class="settings-grid">
+            <article class="dashboard-panel"><h2>Project Paths</h2><div id="settingsPaths" class="settings-list"></div></article>
+            <article class="dashboard-panel"><h2>Version Control</h2><p>No commit, push, PR, merge, deploy, tag, or release actions are performed by this app.</p></article>
+          </section>
+        </section>
+      </section>
+
+      <div id="itemModal" class="modal-shell" hidden></div>
+    </main>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

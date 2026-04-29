@@ -1,0 +1,14 @@
+{
+  "name": "agentic-pm-tools-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone PM Tools app for portable project-management markdown files.",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/readBacklog.test.js",
+    "check": "npm test"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
