@@ -12,7 +12,7 @@ const KNOWN_SECTION_ORDER = [
   'Human Testing Plan',
   'Codex Prompt',
   'Changed Files',
-  'Eddie Review Needed',
+  'Owner Review Needed',
   'Archive Note',
   'Defer Note',
   'Links',
@@ -50,6 +50,8 @@ const STATUS_GROUPS = {
   Inactive: ['Blocked', 'Deferred', 'Rejected', 'Duplicate', 'Archived'],
 };
 const STATUS_OPTIONS = ['New', 'Clarifying', 'Ready', 'Planned', 'In Development', 'Development Complete', 'Needs Review', 'Changes Requested', 'Ready for Testing', 'In Testing', 'Failed Testing', 'Passed Testing', 'Ready to Deploy', 'Deployed', 'Blocked', 'Deferred', 'Rejected', 'Duplicate', 'Archived'];
+const NON_INACTIVE_STATUS_FILTER = '__non_inactive__';
+const INACTIVE_STATUSES = new Set(STATUS_GROUPS.Inactive);
 const PRIORITY_OPTIONS = ['Critical', 'High', 'Medium', 'Low', 'Someday', 'Parking Lot'];
 const EFFORT_OPTIONS = ['XS', 'S', 'M', 'L', 'XL', 'Unknown'];
 const FORM_FIELDS = [
@@ -64,7 +66,7 @@ const FORM_FIELDS = [
   ['implementationNotes', 'Implementation Notes', 'Implementation Notes', 4],
   ['testingNotes', 'Testing Notes', 'Testing Notes', 4],
   ['humanTestingPlan', 'Human Testing Plan', 'Human Testing Plan', 4],
-  ['eddieReviewNeeded', 'Eddie Review Needed', 'Eddie Review Needed', 3],
+  ['ownerReviewNeeded', 'Owner Review Needed', 'Owner Review Needed', 3],
   ['links', 'Links', 'Links', 3],
 ];
 
@@ -80,8 +82,27 @@ const state = {
   projectPath: '',
   lastValidation: '',
   lastPrompt: { type: '', source: '', timestamp: '' },
-  filters: { search: '', status: '', priority: '', folder: '', sort: 'updated', sortDir: 'desc' },
+  filters: { search: '', type: '', status: NON_INACTIVE_STATUS_FILTER, priority: '', effort: '', release: '', folder: '', sort: 'updated', sortDir: 'desc' },
+  config: { activeProjectId: '', activeProject: null, projects: [], projectPath: '', projectLabel: '', recentProjects: [] },
+  editingProjectId: '',
+  projectFormMode: '',
+  projectForm: { label: '', path: '', color: '#253858' },
+  projectAnalysis: null,
+  controlManager: { status: null, recommendations: null, approvalPackage: null, message: '' },
 };
+
+const PROJECT_COLORS = [
+  { label: 'Navy', value: '#253858' },
+  { label: 'Blue', value: '#1d4ed8' },
+  { label: 'Teal', value: '#0f766e' },
+  { label: 'Green', value: '#166534' },
+  { label: 'Mustard', value: '#8a6f00' },
+  { label: 'Orange', value: '#c2410c' },
+  { label: 'Red', value: '#b91c1c' },
+  { label: 'Purple', value: '#6d28d9' },
+  { label: 'Slate', value: '#334155' },
+  { label: 'Charcoal', value: '#27272a' },
+];
 
 const els = {
   refreshBtn: document.getElementById('refreshBtn'),
@@ -111,11 +132,20 @@ const els = {
   rows: document.getElementById('backlogRows'),
   error: document.getElementById('error'),
   searchFilter: document.getElementById('searchFilter'),
+  typeFilter: document.getElementById('typeFilter'),
   statusFilter: document.getElementById('statusFilter'),
   priorityFilter: document.getElementById('priorityFilter'),
+  effortFilter: document.getElementById('effortFilter'),
+  releaseFilter: document.getElementById('releaseFilter'),
   folderFilter: document.getElementById('folderFilter'),
   sortSelect: document.getElementById('sortSelect'),
   selectionCount: document.getElementById('selectionCount'),
+  bulkReleaseInput: document.getElementById('bulkReleaseInput'),
+  bulkReleaseBtn: document.getElementById('bulkReleaseBtn'),
+  bulkPrioritySelect: document.getElementById('bulkPrioritySelect'),
+  bulkPriorityBtn: document.getElementById('bulkPriorityBtn'),
+  bulkStatusSelect: document.getElementById('bulkStatusSelect'),
+  bulkStatusBtn: document.getElementById('bulkStatusBtn'),
   goReleasesBtn: document.getElementById('goReleasesBtn'),
   validateBtn: document.getElementById('validateBtn'),
   validationReminder: document.getElementById('validationReminder'),
@@ -140,7 +170,14 @@ const els = {
   copyPromptBtn: document.getElementById('copyPromptBtn'),
   itemModal: document.getElementById('itemModal'),
   settingsPaths: document.getElementById('settingsPaths'),
+  controlManager: document.getElementById('controlManager'),
+  refreshControlManagerBtn: document.getElementById('refreshControlManagerBtn'),
   viewTitle: document.getElementById('viewTitle'),
+  activeProjectSelect: document.getElementById('activeProjectSelect'),
+  activeProjectButton: document.getElementById('activeProjectButton'),
+  activeProjectSwatch: document.getElementById('activeProjectSwatch'),
+  activeProjectLabel: document.getElementById('activeProjectLabel'),
+  activeProjectMenu: document.getElementById('activeProjectMenu'),
 };
 
 function escapeHtml(value) {
@@ -153,6 +190,15 @@ function uniqueValues(items, key) {
 
 function populateFilter(select, values, currentValue, defaultLabel) {
   select.innerHTML = [`<option value="">${escapeHtml(defaultLabel)}</option>`, ...values.map((value) => `<option value="${escapeHtml(value)}"${value === currentValue ? ' selected' : ''}>${escapeHtml(value)}</option>`)].join('');
+}
+
+function populateStatusFilter(select, values, currentValue) {
+  const options = [
+    `<option value="${NON_INACTIVE_STATUS_FILTER}"${currentValue === NON_INACTIVE_STATUS_FILTER ? ' selected' : ''}>Non-inactive statuses</option>`,
+    `<option value=""${currentValue === '' ? ' selected' : ''}>All statuses</option>`,
+    ...values.map((value) => `<option value="${escapeHtml(value)}"${value === currentValue ? ' selected' : ''}>${escapeHtml(value)}</option>`),
+  ];
+  select.innerHTML = options.join('');
 }
 
 function optionList(values, selected) {
@@ -175,8 +221,12 @@ function sectionValue(item, title) {
   return item?.sections?.[title]?.content ?? '';
 }
 
+function badgeKey(value) {
+  return String(value || '').toLowerCase().replace(/[\s/]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
+
 function badge(value, type) {
-  const key = String(value || '').toLowerCase().replace(/[\s/]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  const key = badgeKey(value);
   return `<span class="badge badge-${type}${key ? ` bv-${key}` : ''}">${escapeHtml(value || '-')}</span>`;
 }
 
@@ -187,8 +237,13 @@ function matchesSearch(item, query) {
 
 function filteredItems() {
   const items = state.items.filter((item) => matchesSearch(item, state.filters.search)
-    && (!state.filters.status || item.status === state.filters.status)
+    && (!state.filters.type || itemType(item) === state.filters.type)
+    && (!state.filters.status
+      || (state.filters.status === NON_INACTIVE_STATUS_FILTER && !INACTIVE_STATUSES.has(item.status))
+      || item.status === state.filters.status)
     && (!state.filters.priority || item.priority === state.filters.priority)
+    && (!state.filters.effort || item.effort === state.filters.effort)
+    && (!state.filters.release || item.release === state.filters.release)
     && (!state.filters.folder || item.folder === state.filters.folder));
   const priorityRank = { Critical: 0, High: 1, Medium: 2, Low: 3, Someday: 4, 'Parking Lot': 5 };
   const dir = state.filters.sortDir === 'asc' ? 1 : -1;
@@ -280,13 +335,502 @@ function renderAttentionPanels() {
   els.recentActivity.innerHTML = recent.length ? recent.map(attentionItem).join('') : '<p class="muted">No recent items.</p>';
 }
 
-function renderSettings() {
-  els.settingsPaths.innerHTML = `
-    <div class="field-row"><span>Project Path</span><strong>${escapeHtml(state.projectPath || './docs/project')}</strong></div>
-    <div class="field-row"><span>Backlog Path</span><strong>./docs/project/backlog</strong></div>
-    <div class="field-row"><span>Release Path</span><strong>./docs/project/releases</strong></div>
-    <div class="field-row"><span>Validation Reminder</span><strong>${escapeHtml(state.lastValidation ? `Last run ${state.lastValidation}` : 'Validation has not run yet')}</strong></div>
+function activeProject() {
+  return state.config.activeProject || state.config.projects.find((project) => project.id === state.config.activeProjectId) || null;
+}
+
+function applyProjectTheme() {
+  const project = activeProject();
+  const color = project?.color || '#253858';
+  const textColor = highContrastTextColor(color);
+  document.documentElement.style.setProperty('--project-nav-bg', color);
+  document.documentElement.style.setProperty('--project-nav-text', textColor);
+  document.documentElement.style.setProperty('--project-nav-text-muted', textColor === '#111827' ? '#243041' : '#f8fafc');
+  document.documentElement.style.setProperty('--project-nav-active-bg', textColor === '#111827' ? 'rgba(255, 255, 255, 0.48)' : 'rgba(255, 255, 255, 0.16)');
+  document.documentElement.style.setProperty('--project-nav-hover-bg', textColor === '#111827' ? 'rgba(255, 255, 255, 0.34)' : 'rgba(255, 255, 255, 0.1)');
+}
+
+function highContrastTextColor(hexColor) {
+  const match = String(hexColor || '').match(/^#?([0-9a-f]{6})$/i);
+  if (!match) return '#f8fafc';
+  const value = match[1];
+  const channel = (index) => {
+    const raw = parseInt(value.slice(index, index + 2), 16) / 255;
+    return raw <= 0.03928 ? raw / 12.92 : ((raw + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+  return luminance > 0.46 ? '#111827' : '#f8fafc';
+}
+
+function normalizeConfig(data = {}) {
+  const projects = Array.isArray(data.projects) ? data.projects : [];
+  const active = data.activeProject || projects.find((project) => project.id === data.activeProjectId) || null;
+  return {
+    activeProjectId: data.activeProjectId || active?.id || '',
+    activeProject: active,
+    projects,
+    projectPath: data.projectPath ?? active?.path ?? '',
+    projectLabel: data.projectLabel ?? active?.label ?? '',
+    recentProjects: Array.isArray(data.recentProjects) ? data.recentProjects : [],
+  };
+}
+
+function renderProjectSelector() {
+  const projects = state.config.projects || [];
+  const active = activeProject();
+  if (els.activeProjectSelect) {
+    els.activeProjectSelect.innerHTML = projects.length
+      ? projects.map((project) => `<option value="${escapeHtml(project.id)}"${project.id === state.config.activeProjectId ? ' selected' : ''}>${escapeHtml(project.label || project.path)}</option>`).join('')
+      : '<option value="">No projects</option>';
+    els.activeProjectSelect.disabled = projects.length === 0;
+  }
+  if (els.activeProjectButton) els.activeProjectButton.disabled = projects.length === 0;
+  if (els.activeProjectSwatch) els.activeProjectSwatch.style.background = active?.color || '#253858';
+  if (els.activeProjectLabel) els.activeProjectLabel.textContent = active?.label || active?.path || 'No projects';
+  if (els.activeProjectMenu) {
+    els.activeProjectMenu.innerHTML = projects.map((project) => `
+      <button type="button" class="project-picker-option${project.id === state.config.activeProjectId ? ' active' : ''}" data-project-picker-id="${escapeHtml(project.id)}">
+        <span class="project-picker-swatch" style="background:${escapeHtml(project.color || '#253858')}"></span>
+        <strong>${escapeHtml(project.label || project.path)}</strong>
+      </button>
+    `).join('');
+  }
+}
+
+function analysisSummary(analysis) {
+  if (!analysis) return 'Not analyzed in this session.';
+  return `Errors: ${analysis.counts?.Error ?? 0} | Warnings: ${analysis.counts?.Warning ?? 0} | Info: ${analysis.counts?.Info ?? 0}`;
+}
+
+function renderAnalysisReport(analysis) {
+  if (!analysis) return '<p class="muted">Analyze a project path to preview structure findings before saving.</p>';
+  const groups = ['Error', 'Warning', 'Info'];
+  return `
+    <div class="validation-counts">
+      <span class="count-error">Errors: ${analysis.counts?.Error ?? 0}</span>
+      <span class="count-warning">Warnings: ${analysis.counts?.Warning ?? 0}</span>
+      <span class="count-info">Info: ${analysis.counts?.Info ?? 0}</span>
+    </div>
+    ${groups.map((severity) => {
+      const findings = (analysis.findings ?? []).filter((finding) => finding.severity === severity);
+      return `<section class="finding-group"><h3>${severity}</h3>${findings.length ? `<ul>${findings.map(renderFinding).join('')}</ul>` : '<p class="muted">No findings.</p>'}</section>`;
+    }).join('')}
   `;
+}
+
+function renderProjectColorChoices(selectedColor = '#253858') {
+  const selected = PROJECT_COLORS.some((color) => color.value === selectedColor) ? selectedColor : '#253858';
+  return `
+    <input id="settingsColor" type="hidden" value="${escapeHtml(selected)}" />
+    <div class="color-choice-list" role="radiogroup" aria-label="Project color">
+      ${PROJECT_COLORS.map((color) => `
+        <button
+          type="button"
+          class="color-choice${color.value === selected ? ' selected' : ''}"
+          data-color-choice="${escapeHtml(color.value)}"
+          style="--choice-color:${escapeHtml(color.value)}"
+          aria-label="${escapeHtml(color.label)}"
+          aria-pressed="${color.value === selected ? 'true' : 'false'}"
+          title="${escapeHtml(color.label)}"
+        ></button>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderSettings() {
+  const cfg = state.config;
+  const projects = cfg.projects || [];
+  const editingProject = projects.find((project) => project.id === state.editingProjectId);
+  const formOpen = state.projectFormMode === 'new' || Boolean(editingProject);
+  const formProject = state.projectForm.path || state.projectForm.label || state.projectForm.color !== '#253858'
+    ? state.projectForm
+    : (editingProject || { label: '', path: '', color: '#253858' });
+  const canSave = state.projectAnalysis?.isValid;
+  const projectCards = projects.length ? projects.map((project) => {
+    const isActive = project.id === cfg.activeProjectId;
+    return `
+      <li class="project-registry-item${isActive ? ' active' : ''}" data-card-project="${escapeHtml(project.id)}" tabindex="0">
+        <div class="project-card-main">
+          <span class="project-color-swatch" style="background:${escapeHtml(project.color || '#253858')}"></span>
+          <div>
+            <strong>${escapeHtml(project.label || project.path)}</strong>
+            <code>${escapeHtml(project.path)}</code>
+            <small>${isActive ? 'Active project' : 'Saved project'}${project.lastValidatedAt ? ` | Last analyzed: ${escapeHtml(formatValidationTimestamp(project.lastValidatedAt))}` : ''}</small>
+          </div>
+        </div>
+        <div class="project-card-actions">
+          <button type="button" class="secondary small-button" data-edit-project="${escapeHtml(project.id)}">Edit</button>
+          <button type="button" class="secondary small-button danger-button" data-remove-project="${escapeHtml(project.id)}">Remove Entry</button>
+        </div>
+      </li>`;
+  }).join('') : '<li class="project-registry-empty">No saved projects.</li>';
+  els.settingsPaths.innerHTML = `
+    <div class="settings-section">
+      <div class="settings-section-heading">
+        <h3>Saved Projects</h3>
+        <button type="button" id="newProjectBtn" class="primary small-button">Add Project</button>
+      </div>
+      <ul class="project-registry">${projectCards}</ul>
+    </div>
+    ${formOpen ? `
+    <div class="settings-form">
+      <div class="field-row">
+        <label for="settingsLabel">Project Label</label>
+        <input id="settingsLabel" type="text" value="${escapeHtml(formProject.label)}" placeholder="e.g. My App" />
+      </div>
+      <div class="field-row">
+        <label for="settingsPath">Project Path</label>
+        <div class="path-picker-row">
+          <input id="settingsPath" type="text" value="${escapeHtml(formProject.path)}" placeholder="Project repo or docs/project folder" style="flex:1" />
+          <button type="button" id="browseProjectBtn" class="secondary small-button">Browse</button>
+        </div>
+      </div>
+      <div class="field-row">
+        <label for="settingsColor">Project Color</label>
+        ${renderProjectColorChoices(formProject.color || '#253858')}
+      </div>
+      <div class="field-row project-form-actions">
+        <span>Actions</span>
+        <div>
+          <button type="button" id="analyzeProjectBtn" class="secondary small-button">Analyze</button>
+          <button type="button" id="saveConfigBtn" class="primary small-button"${canSave ? '' : ' disabled'}>${editingProject ? 'Save Project' : 'Add Project'}</button>
+          <button type="button" id="cancelProjectEditBtn" class="secondary small-button">Cancel</button>
+          <span id="configMsg" class="muted" style="margin-left:8px"></span>
+        </div>
+      </div>
+      <div class="field-row"><span>Analysis</span><strong>${escapeHtml(analysisSummary(state.projectAnalysis))}</strong></div>
+    </div>
+    <div class="settings-section project-analysis-report">
+      <h3>Analysis Report</h3>
+      ${renderAnalysisReport(state.projectAnalysis)}
+    </div>
+    ` : ''}
+  `;
+  renderProjectSelector();
+  applyProjectTheme();
+}
+
+function renderControlManager() {
+  if (!els.controlManager) return;
+  const status = state.controlManager.status;
+  const recommendations = state.controlManager.recommendations;
+  const approval = state.controlManager.approvalPackage;
+  if (!status) {
+    els.controlManager.innerHTML = '<p class="muted">Control Manager status is not loaded yet.</p>';
+    return;
+  }
+  if (status.error) {
+    els.controlManager.innerHTML = `<div class="error">${escapeHtml(status.error)}</div>`;
+    return;
+  }
+  const changedFiles = status.changedFiles || [];
+  const stagedFiles = status.stagedFiles || [];
+  const methodologyFiles = status.methodology?.files || [];
+  const warningList = [...(status.warnings || []), ...(approval?.risks || [])];
+  const byRelease = recommendations?.byRelease || {};
+  const approvalSelected = approval?.selectedFiles || changedFiles.map((file) => file.path);
+  const releaseOptions = Object.keys(byRelease);
+  const selectedRelease = approval?.releaseId || releaseOptions[0] || '';
+  const branchName = approval?.branchName || (selectedRelease ? `release/${selectedRelease}` : `release/${new Date().toISOString().slice(0, 10)}`);
+  const commitMessage = approval?.commitMessage || (selectedRelease ? `feat: deliver release ${selectedRelease}` : 'chore: update selected project work');
+  const confirmPhrase = approval?.requiredConfirmations?.commit || `COMMIT ${selectedRelease || branchName || 'SELECTED'}`;
+  els.controlManager.innerHTML = `
+    <div class="control-grid">
+      <section>
+        <h3>Repository</h3>
+        <div class="detail-grid compact">
+          ${readonlyField('Root', status.repoRoot)}
+          ${readonlyField('Branch', status.branch || '-')}
+          ${readonlyField('Upstream', status.upstream || 'Not set')}
+          ${readonlyField('Dirty Files', String(changedFiles.length))}
+        </div>
+      </section>
+      <section>
+        <h3>Methodology</h3>
+        <ul class="control-list">${methodologyFiles.map((file) => `<li class="${file.found ? '' : 'warning-row'}"><strong>${escapeHtml(file.label)}</strong><span>${file.found ? 'Loaded' : 'Missing'}</span></li>`).join('')}</ul>
+      </section>
+    </div>
+    <section class="control-section">
+      <h3>Promotable Work</h3>
+      ${recommendations?.itemCount ? Object.entries(byRelease).map(([release, items]) => `
+        <div class="release-recommendation">
+          <strong>${escapeHtml(release)}</strong>
+          <ul>${items.map((item) => `<li><span class="mono">${escapeHtml(item.id)}</span> ${escapeHtml(item.title)} ${badge(item.status, 'status')}</li>`).join('')}</ul>
+        </div>
+      `).join('') : '<p class="muted">No items are Ready to Deploy or Passed Testing.</p>'}
+    </section>
+    <section class="control-section">
+      <h3>Changed Files</h3>
+      ${changedFiles.length ? `<div class="file-check-list">${changedFiles.map((file) => `
+        <label><input type="checkbox" class="control-file-check" value="${escapeHtml(file.path)}"${approvalSelected.includes(file.path) ? ' checked' : ''}> <code>${escapeHtml(file.path)}</code> <span>${escapeHtml(`${file.index}${file.worktree}`)}</span></label>
+      `).join('')}</div>` : '<p class="muted">No changed files.</p>'}
+    </section>
+    <section class="control-section approval-builder">
+      <h3>Approval Package</h3>
+      <div class="control-form-grid">
+        <label>Release<select id="controlRelease">${releaseOptions.map((release) => `<option value="${escapeHtml(release)}"${release === selectedRelease ? ' selected' : ''}>${escapeHtml(release)}</option>`).join('')}</select></label>
+        <label>Branch<input id="controlBranch" type="text" value="${escapeHtml(branchName)}"></label>
+        <label>Commit Message<input id="controlCommitMessage" type="text" value="${escapeHtml(commitMessage)}"></label>
+        <label>Typed Approval<input id="controlConfirmation" type="text" placeholder="${escapeHtml(confirmPhrase)}"></label>
+      </div>
+      <div class="control-actions">
+        <button type="button" class="secondary small-button" data-control-preview>Preview Package</button>
+        <button type="button" class="secondary small-button" data-control-action="prepare-branch" data-required-confirmation="${escapeHtml(approval?.requiredConfirmations?.prepareBranch || '')}" disabled>Prepare Branch</button>
+        <button type="button" class="secondary small-button" data-control-action="stage-selected" data-required-confirmation="${escapeHtml(approval?.requiredConfirmations?.stageSelected || '')}" disabled>Stage Selected</button>
+        <button type="button" class="secondary small-button" data-control-action="commit" data-required-confirmation="${escapeHtml(approval?.requiredConfirmations?.commit || '')}" disabled>Commit</button>
+        <button type="button" class="secondary small-button" data-control-action="push" data-required-confirmation="${escapeHtml(approval?.requiredConfirmations?.push || '')}" disabled>Push</button>
+        <button type="button" class="secondary small-button" data-control-action="open-pr" data-required-confirmation="${escapeHtml(approval?.requiredConfirmations?.openPr || '')}" disabled>Open PR</button>
+        <button type="button" class="secondary small-button" data-control-action="merge-pr" data-required-confirmation="${escapeHtml(approval?.requiredConfirmations?.mergePr || '')}" disabled>Merge PR</button>
+      </div>
+      ${approval ? `<pre class="control-package">${escapeHtml(JSON.stringify({
+        selectedFiles: approval.selectedFiles,
+        excludedFiles: approval.excludedFiles,
+        tests: approval.tests?.commands,
+        backlogItems: approval.backlogItems?.map((item) => item.id),
+        commitMessage: approval.commitMessage,
+        commands: approval.commands,
+        requiredConfirmations: approval.requiredConfirmations,
+      }, null, 2))}</pre>` : '<p class="muted">Preview the package before running any action.</p>'}
+    </section>
+    ${warningList.length ? `<section class="control-section"><h3>Guardrails</h3><ul class="warning-list">${warningList.map((warning) => `<li>${escapeHtml(warning)}</li>`).join('')}</ul></section>` : ''}
+    ${state.controlManager.message ? `<div class="create-message">${escapeHtml(state.controlManager.message)}</div>` : ''}
+  `;
+}
+
+function controlPayload() {
+  const selectedFiles = [...document.querySelectorAll('.control-file-check:checked')].map((input) => input.value);
+  const changedFiles = state.controlManager.status?.changedFiles?.map((file) => file.path) || [];
+  const excludedFiles = changedFiles.filter((file) => !selectedFiles.includes(file));
+  const releaseId = document.getElementById('controlRelease')?.value || '';
+  const branchName = document.getElementById('controlBranch')?.value?.trim() || '';
+  return {
+    selectedFiles,
+    excludedFiles,
+    releaseId,
+    branchName,
+    commitMessage: document.getElementById('controlCommitMessage')?.value?.trim() || '',
+    confirmation: document.getElementById('controlConfirmation')?.value?.trim() || '',
+    prTitle: document.getElementById('controlCommitMessage')?.value?.trim() || '',
+    prBody: `Prepared by PM Tools Control Manager for ${releaseId || branchName}.`,
+    prNumber: document.getElementById('controlConfirmation')?.value?.trim()?.match(/MERGE PR\s+(\d+)/i)?.[1] || '',
+  };
+}
+
+function updateControlActionButtons() {
+  const typed = document.getElementById('controlConfirmation')?.value?.trim() || '';
+  document.querySelectorAll('[data-control-action]').forEach((button) => {
+    const required = button.dataset.requiredConfirmation || '';
+    button.disabled = !required || typed !== required;
+  });
+}
+
+async function loadControlManager() {
+  if (!els.controlManager) return;
+  els.controlManager.innerHTML = '<p class="muted">Loading control manager...</p>';
+  try {
+    const [statusResponse, recommendationsResponse] = await Promise.all([
+      fetch('/api/control-manager/status', { cache: 'no-store' }),
+      fetch('/api/control-manager/recommendations', { cache: 'no-store' }),
+    ]);
+    const status = await statusResponse.json();
+    const recommendations = await recommendationsResponse.json();
+    if (!statusResponse.ok || status.error) throw new Error(status.error || `Status failed with ${statusResponse.status}`);
+    if (!recommendationsResponse.ok || recommendations.error) throw new Error(recommendations.error || `Recommendations failed with ${recommendationsResponse.status}`);
+    state.controlManager = { status, recommendations, approvalPackage: null, message: '' };
+    renderControlManager();
+  } catch (error) {
+    state.controlManager = { status: { error: error.message || 'Control Manager failed to load.' }, recommendations: null, approvalPackage: null, message: '' };
+    renderControlManager();
+  }
+}
+
+async function previewControlPackage() {
+  try {
+    const response = await fetch('/api/control-manager/approval-package', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(controlPayload()),
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || `Preview failed with ${response.status}`);
+    state.controlManager.approvalPackage = data;
+    state.controlManager.message = 'Approval package refreshed.';
+    renderControlManager();
+  } catch (error) {
+    state.controlManager.message = error.message || 'Approval package preview failed.';
+    renderControlManager();
+  }
+}
+
+async function runControlAction(action) {
+  try {
+    const response = await fetch(`/api/control-manager/actions/${encodeURIComponent(action)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(controlPayload()),
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || `${action} failed with ${response.status}`);
+    state.controlManager.message = `${action} completed.`;
+    await loadControlManager();
+  } catch (error) {
+    state.controlManager.message = error.message || `${action} failed.`;
+    renderControlManager();
+  }
+}
+
+async function loadConfig() {
+  try {
+    const response = await fetch('/api/config', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || `Request failed with ${response.status}`);
+    state.config = normalizeConfig(data);
+    renderSettings();
+  } catch {
+    // non-fatal: settings will show empty form
+  }
+}
+
+async function analyzeProject() {
+  const msgEl = document.getElementById('configMsg');
+  if (msgEl) { msgEl.textContent = 'Analyzing...'; msgEl.className = 'muted'; }
+  try {
+    const labelInput = document.getElementById('settingsLabel');
+    const pathInput = document.getElementById('settingsPath');
+    const colorInput = document.getElementById('settingsColor');
+    state.projectForm = {
+      label: labelInput?.value?.trim() || '',
+      path: pathInput?.value?.trim() || '',
+      color: colorInput?.value || '#253858',
+    };
+    const response = await fetch('/api/projects/analyze', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: state.projectForm.path }),
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || `Analysis failed with ${response.status}`);
+    state.projectAnalysis = data;
+    renderSettings();
+    const msg = document.getElementById('configMsg');
+    if (msg) { msg.textContent = data.isValid ? 'Analysis passed.' : 'Analysis found structural errors.'; msg.className = data.isValid ? 'muted' : 'error-text'; }
+  } catch (error) {
+    const msg = document.getElementById('configMsg');
+    if (msg) { msg.textContent = error.message || 'Analysis failed.'; msg.className = 'error-text'; }
+  }
+}
+
+async function browseProjectPath() {
+  const msgEl = document.getElementById('configMsg');
+  if (msgEl) { msgEl.textContent = 'Opening folder browser...'; msgEl.className = 'muted'; }
+  try {
+    const response = await fetch('/api/projects/browse', { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || `Browse failed with ${response.status}`);
+    if (!data.selectedPath) {
+      if (msgEl) msgEl.textContent = 'Folder selection cancelled.';
+      return;
+    }
+    const pathInput = document.getElementById('settingsPath');
+    if (pathInput) pathInput.value = data.selectedPath;
+    const labelInput = document.getElementById('settingsLabel');
+    const colorInput = document.getElementById('settingsColor');
+    state.projectForm = {
+      label: labelInput?.value?.trim() || '',
+      path: data.selectedPath,
+      color: colorInput?.value || '#253858',
+    };
+    state.projectAnalysis = null;
+    const msg = document.getElementById('configMsg');
+    if (msg) { msg.textContent = 'Folder selected. Analyze before saving.'; msg.className = 'muted'; }
+  } catch (error) {
+    const msg = document.getElementById('configMsg');
+    if (msg) { msg.textContent = error.message || 'Browse failed.'; msg.className = 'error-text'; }
+  }
+}
+
+async function saveProjectConfig() {
+  const msgEl = document.getElementById('configMsg');
+  if (msgEl) { msgEl.textContent = 'Saving...'; msgEl.className = 'muted'; }
+  try {
+    const labelInput = document.getElementById('settingsLabel');
+    const pathInput = document.getElementById('settingsPath');
+    const colorInput = document.getElementById('settingsColor');
+    const payload = {
+      label: labelInput?.value?.trim() || state.projectForm.label,
+      path: state.projectAnalysis?.isValid && state.projectAnalysis.projectPath
+        ? state.projectAnalysis.projectPath
+        : (pathInput?.value?.trim() || state.projectForm.path),
+      color: colorInput?.value || state.projectForm.color || '#253858',
+    };
+    state.projectForm = { ...payload };
+    const response = await fetch(state.editingProjectId ? `/api/projects/${encodeURIComponent(state.editingProjectId)}` : '/api/projects', {
+      method: state.editingProjectId ? 'PUT' : 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      if (data.analysis) state.projectAnalysis = data.analysis;
+      throw new Error(data.error || `Save failed with ${response.status}`);
+    }
+    state.config = normalizeConfig(data);
+    state.projectAnalysis = data.analysis || null;
+    state.projectForm = { label: '', path: '', color: '#253858' };
+    state.editingProjectId = '';
+    state.projectFormMode = '';
+    renderSettings();
+    await reloadProjectData();
+  } catch (error) {
+    renderSettings();
+    const msg = document.getElementById('configMsg');
+    if (msg) { msg.textContent = error.message || 'Save failed.'; msg.className = 'error-text'; }
+  }
+}
+
+async function setActiveProject(projectId) {
+  if (!projectId || projectId === state.config.activeProjectId) return;
+  try {
+    const response = await fetch('/api/config/active-project', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ activeProjectId: projectId }),
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      if (data.analysis) state.projectAnalysis = data.analysis;
+      throw new Error(data.error || `Project switch failed with ${response.status}`);
+    }
+    state.config = normalizeConfig(data);
+    state.projectAnalysis = data.analysis || null;
+    state.selectedIds.clear();
+    state.selectedId = '';
+    state.selectedReleaseId = '';
+    renderSettings();
+    await reloadProjectData();
+  } catch (error) {
+    showError(error.message || 'Project switch failed.');
+    renderSettings();
+  }
+}
+
+async function removeProject(projectId) {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
+  const data = await response.json();
+  if (!response.ok || data.error) {
+    showError(data.error || `Remove failed with ${response.status}`);
+    return;
+  }
+  state.config = normalizeConfig(data);
+  if (state.editingProjectId === projectId) {
+    state.editingProjectId = '';
+    state.projectFormMode = '';
+    state.projectForm = { label: '', path: '', color: '#253858' };
+  }
+  state.projectAnalysis = null;
+  renderSettings();
+  await reloadProjectData();
 }
 
 function renderDashboard() {
@@ -294,17 +838,17 @@ function renderDashboard() {
   els.itemCount.textContent = String(state.items.length);
   els.activeCount.textContent = String(state.items.filter((item) => item.folder === 'active').length);
   els.completedCount.textContent = String(state.items.filter((item) => item.status === 'Deployed').length);
-  els.blockedCount.textContent = String(state.items.filter((item) => item.status === 'Blocked').length);
-  els.clarifyingCount.textContent = String(state.items.filter((item) => item.status === 'Clarifying').length);
-  els.deployReadyCount.textContent = String(state.items.filter((item) => ['Ready', 'Ready to Deploy', 'Passed Testing'].includes(item.status)).length);
+  if (els.blockedCount) els.blockedCount.textContent = String(state.items.filter((item) => item.status === 'Blocked').length);
+  if (els.clarifyingCount) els.clarifyingCount.textContent = String(state.items.filter((item) => item.status === 'Clarifying').length);
+  if (els.deployReadyCount) els.deployReadyCount.textContent = String(state.items.filter((item) => ['Ready', 'Ready to Deploy', 'Passed Testing'].includes(item.status)).length);
   els.newCount.textContent = String(state.items.filter((item) => item.status === 'New').length);
   els.developmentCount.textContent = String(state.items.filter((item) => item.status === 'In Development').length);
-  els.readyTestingCount.textContent = String(state.items.filter((item) => item.status === 'Ready for Testing').length);
+  if (els.readyTestingCount) els.readyTestingCount.textContent = String(state.items.filter((item) => item.status === 'Ready for Testing').length);
   els.passedTestingCount.textContent = String(state.items.filter((item) => item.status === 'Passed Testing').length);
-  renderPills(els.prioritySummary, countBy(open, 'priority'));
-  renderGroupedStatusPills(els.statusSummary, countBy(open, 'status'));
-  renderPills(els.typeSummary, countByType(open));
-  renderPills(els.releaseSummary, state.releases.length ? Object.fromEntries(state.releases.map((release) => [release.id, release.itemCount])) : {});
+  if (els.prioritySummary) renderPills(els.prioritySummary, countBy(open, 'priority'));
+  if (els.statusSummary) renderGroupedStatusPills(els.statusSummary, countBy(open, 'status'));
+  if (els.typeSummary) renderPills(els.typeSummary, countByType(open));
+  if (els.releaseSummary) renderPills(els.releaseSummary, state.releases.length ? Object.fromEntries(state.releases.map((release) => [release.id, release.itemCount])) : {});
   renderBoard();
   renderAttentionPanels();
   renderSettings();
@@ -319,16 +863,17 @@ function renderBoard() {
   els.statusBoard.innerHTML = groups.map((status) => {
     const items = state.items.filter((item) => item.status === status);
     return `
-      <div class="board-column">
+      <div class="board-column" data-drop-status="${escapeHtml(status)}">
         <div class="board-column-header"><span>${escapeHtml(status)}</span><strong>${items.length}</strong></div>
         <div class="board-cards">
           ${items.slice(0, 6).map((item) => `
-            <button type="button" class="board-card" data-open-item="${escapeHtml(item.id)}">
+            <button type="button" class="board-card" draggable="true" data-item-id="${escapeHtml(item.id)}" data-open-item="${escapeHtml(item.id)}">
               <span>${escapeHtml(item.id)}</span>
               <strong>${escapeHtml(item.title)}</strong>
               <em>${escapeHtml(item.priority || '-')} · ${escapeHtml(item.effort || '-')}</em>
               <small>${escapeHtml(item.release || 'Unassigned')} · ${escapeHtml(item.updated || '-')}</small>
             </button>`).join('')}
+          ${items.length > 6 ? `<button type="button" class="board-overflow" data-board-status-filter="${escapeHtml(status)}">+ ${items.length - 6} more</button>` : ''}
         </div>
       </div>
     `;
@@ -358,7 +903,7 @@ function renderRows() {
       <td class="mono">${escapeHtml(item.id || '-')}</td>
       <td>${badge(itemType(item), 'type')}</td>
       <td><button type="button" class="link-button" data-open-item="${escapeHtml(item.id)}">${escapeHtml(item.title || '(untitled)')}</button><div class="path">${escapeHtml(item.path || item.fileName || '')}</div></td>
-      <td>${badge(item.status, 'status')}</td>
+      <td><button type="button" class="badge badge-status${badgeKey(item.status) ? ` bv-${badgeKey(item.status)}` : ''}" data-status-pick="${escapeHtml(item.id)}">${escapeHtml(item.status || '-')}</button></td>
       <td>${badge(item.priority, 'priority')}</td>
       <td>${escapeHtml(item.effort || '-')}</td>
       <td>${escapeHtml(item.release || '-')}</td>
@@ -371,9 +916,14 @@ function renderRows() {
 }
 
 function renderFilters() {
-  populateFilter(els.statusFilter, uniqueValues(state.items, 'status'), state.filters.status, 'All statuses');
+  populateFilter(els.typeFilter, uniqueValues(state.items.map((item) => ({ type: itemType(item) })), 'type'), state.filters.type, 'All types');
+  populateStatusFilter(els.statusFilter, uniqueValues(state.items, 'status'), state.filters.status);
   populateFilter(els.priorityFilter, uniqueValues(state.items, 'priority'), state.filters.priority, 'All priorities');
+  populateFilter(els.effortFilter, uniqueValues(state.items, 'effort'), state.filters.effort, 'All efforts');
+  populateFilter(els.releaseFilter, uniqueValues(state.items, 'release'), state.filters.release, 'All releases');
   populateFilter(els.folderFilter, uniqueValues(state.items, 'folder'), state.filters.folder, 'All folders');
+  populateFilter(els.bulkPrioritySelect, PRIORITY_OPTIONS, els.bulkPrioritySelect?.value || '', 'Priority...');
+  populateFilter(els.bulkStatusSelect, STATUS_OPTIONS, els.bulkStatusSelect?.value || '', 'Status...');
 }
 
 function readonlyField(label, value) {
@@ -402,7 +952,11 @@ function renderItemForm(mode, item = {}) {
     <section class="item-modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
       <header class="modal-header">
         <div><p class="eyebrow">${escapeHtml(title)}</p><h2>${escapeHtml(isCreate ? 'New backlog item' : `${item.id}: ${item.title}`)}</h2></div>
-        <button type="button" class="secondary" data-close-modal>Close</button>
+        <div class="modal-header-actions">
+          ${isView ? `<button type="button" id="modalEditBtnTop">Edit</button>` : ''}
+          ${isView ? `<button type="button" id="modalPromptBtnTop" class="secondary">Generate Codex Prompt</button>` : ''}
+          <button type="button" class="secondary" data-close-modal>${isView ? 'Close' : 'Cancel'}</button>
+        </div>
       </header>
       <form id="itemForm" class="create-form">
         ${isCreate ? `<label>Type<select name="type" id="itemTypeSelect">${optionList(TYPE_OPTIONS, type === 'Unknown' ? 'Feature' : type)}</select><span class="hint">Prefix is derived automatically.</span></label>` : `${readonlyField('ID', item.id)}${readonlyField('Prefix', item.prefix)}${readonlyField('Number', item.number)}${readonlyField('Type', type)}<input name="type" type="hidden" value="${escapeHtml(type === 'Unknown' ? '' : type)}">`}
@@ -423,8 +977,8 @@ function renderItemForm(mode, item = {}) {
           ${readonlyField('Folder', item.folder)}
         `}
         ${FORM_FIELDS.map(([name, label, section, rows]) => inputField(name, label, isCreate ? '' : sectionValue(item, section), isView, rows)).join('')}
-        ${inputField('archiveReason', 'Archive Reason', item.archive_reason || '', isView)}
-        ${inputField('deferReason', 'Defer Reason', item.defer_reason || '', isView)}
+        ${inputField('archive_reason', 'Archive Reason', item.archive_reason || '', isView)}
+        ${inputField('defer_reason', 'Defer Reason', item.defer_reason || '', isView)}
         <div class="form-actions span-3">
           ${isView ? `<button type="button" id="modalEditBtn">Edit</button>` : `<button type="submit">${isCreate ? 'Create' : 'Update'}</button>`}
           ${!isCreate && !isView ? '<button type="button" id="modalArchiveBtn" class="secondary">Archive</button>' : ''}
@@ -446,8 +1000,10 @@ function openItemModal(mode, id = '') {
   els.itemModal.innerHTML = renderItemForm(mode, item);
   document.getElementById('itemForm')?.addEventListener('submit', submitItemForm);
   document.getElementById('modalEditBtn')?.addEventListener('click', () => openItemModal('edit', id));
+  document.getElementById('modalEditBtnTop')?.addEventListener('click', () => openItemModal('edit', id));
   document.getElementById('modalArchiveBtn')?.addEventListener('click', archiveCurrentItem);
   document.getElementById('modalPromptBtn')?.addEventListener('click', () => generatePrompt('item', id, false));
+  document.getElementById('modalPromptBtnTop')?.addEventListener('click', () => generatePrompt('item', id, false));
   renderRows();
 }
 
@@ -520,7 +1076,7 @@ async function archiveCurrentItem() {
     priority: item.priority,
     effort: item.effort,
     release: item.release,
-    archiveReason: 'Archived from PM Tools app.',
+    archive_reason: 'Archived from PM Tools app.',
   };
   try {
     const response = await fetch(`/api/backlog/items/${encodeURIComponent(item.id)}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
@@ -543,6 +1099,31 @@ function showReleaseMessage(message, type = 'success') {
   els.releaseMessage.hidden = !message;
   els.releaseMessage.textContent = message || '';
   els.releaseMessage.className = `create-message ${type}`;
+}
+
+function releaseItemsTable(items = []) {
+  if (!items.length) return '<p class="muted">No items assigned.</p>';
+  return `
+    <div class="release-items-table-wrap">
+      <table class="release-items-table">
+        <thead>
+          <tr><th>ID</th><th>Title</th><th>Status</th><th>Priority</th><th>Updated</th><th>Path</th></tr>
+        </thead>
+        <tbody>
+          ${items.map((item) => `
+            <tr>
+              <td class="mono"><button type="button" class="link-button" data-open-item="${escapeHtml(item.id)}">${escapeHtml(item.id)}</button></td>
+              <td>${escapeHtml(item.title || '(untitled)')}</td>
+              <td>${badge(item.status, 'status')}</td>
+              <td>${badge(item.priority || '-', 'priority')}</td>
+              <td>${escapeHtml(item.updated || '-')}</td>
+              <td class="path">${escapeHtml(item.path || '-')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 function validationIsRecent(dateText) {
@@ -669,7 +1250,7 @@ function renderReleaseDetail() {
     </section>
     <section class="release-detail-section">
       <h3>Included Backlog Items</h3>
-      <div class="release-items">${(release.items ?? []).map((item) => `<button type="button" class="item-chip" data-open-item="${escapeHtml(item.id)}">${escapeHtml(item.id)}: ${escapeHtml(item.title)}</button>`).join('') || '<span class="muted-inline">No items assigned.</span>'}</div>
+      ${releaseItemsTable(release.items ?? [])}
     </section>
     <div class="release-actions detail-actions">
       <button type="button" class="secondary" data-release-prompt="${escapeHtml(release.id)}">Generate Release Codex Prompt</button>
@@ -694,6 +1275,9 @@ async function loadReleases() {
 
 async function createRelease() {
   const version = els.newReleaseInput.value.trim();
+  if (!version) return showReleaseMessage('Enter a release version such as v0.2.0.', 'error');
+  els.createReleaseBtn.disabled = true;
+  els.createReleaseBtn.textContent = 'Creating...';
   try {
     const response = await fetch('/api/releases', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version }) });
     const result = await response.json();
@@ -704,6 +1288,28 @@ async function createRelease() {
     await loadReleases();
   } catch (error) {
     showReleaseMessage(error.message || 'Create release failed.', 'error');
+  } finally {
+    els.createReleaseBtn.disabled = false;
+    els.createReleaseBtn.textContent = 'Create Release';
+  }
+}
+
+async function copyPromptToClipboard() {
+  const text = els.promptOutput.textContent || '';
+  if (!text.trim()) {
+    els.promptMeta.textContent = 'No prompt available to copy.';
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    els.promptMeta.textContent = `Copied prompt at ${new Date().toLocaleString()}.`;
+  } catch {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(els.promptOutput);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    els.promptMeta.textContent = 'Prompt selected. Use your browser copy command.';
   }
 }
 
@@ -717,38 +1323,51 @@ function renderPromptSelectors() {
 }
 
 async function generatePromptFromWorkspace(save = false) {
+  const button = save ? els.savePromptBtn : els.generatePromptBtn;
+  const originalText = button?.textContent || '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = save ? 'Saving...' : 'Generating...';
+  }
   const promptType = els.promptType.value;
-  if (promptType === 'checklist') {
-    const releaseId = els.promptReleaseSelect.value;
-    if (!releaseId) {
-      els.promptOutput.textContent = 'Select a release first.';
+  try {
+    if (promptType === 'checklist') {
+      const releaseId = els.promptReleaseSelect.value;
+      if (!releaseId) {
+        els.promptOutput.textContent = 'Select a release first.';
+        return;
+      }
+      await generateChecklist(releaseId, save);
       return;
     }
-    await generateChecklist(releaseId, save);
-    return;
-  }
-  if (promptType === 'release') {
-    const releaseId = els.promptReleaseSelect.value;
-    if (!releaseId) {
-      els.promptOutput.textContent = 'Select a release first.';
+    if (promptType === 'release') {
+      const releaseId = els.promptReleaseSelect.value;
+      if (!releaseId) {
+        els.promptOutput.textContent = 'Select a release first.';
+        return;
+      }
+      await generatePrompt('release', releaseId, save);
       return;
     }
-    await generatePrompt('release', releaseId, save);
-    return;
-  }
-  if (promptType === 'version-control') {
-    const releaseId = els.promptReleaseSelect.value;
+    if (promptType === 'version-control') {
+      const releaseId = els.promptReleaseSelect.value;
+      const itemId = els.promptItemSelect.value;
+      const sourceType = releaseId ? 'release' : 'item';
+      await generatePrompt('version-control', releaseId || itemId, false, sourceType);
+      return;
+    }
     const itemId = els.promptItemSelect.value;
-    const sourceType = releaseId ? 'release' : 'item';
-    await generatePrompt('version-control', releaseId || itemId, false, sourceType);
-    return;
+    if (!itemId) {
+      els.promptOutput.textContent = 'Select a backlog item first.';
+      return;
+    }
+    await generatePrompt('item', itemId, save);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
   }
-  const itemId = els.promptItemSelect.value;
-  if (!itemId) {
-    els.promptOutput.textContent = 'Select a backlog item first.';
-    return;
-  }
-  await generatePrompt('item', itemId, save);
 }
 
 async function assignSelectedToRelease() {
@@ -772,35 +1391,137 @@ async function assignSelectedToRelease() {
   }
 }
 
-async function generatePrompt(type, id, save, sourceType = '') {
-  const response = await fetch('/api/prompts/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type, id, save, sourceType }) });
-  const result = await response.json();
-  if (!response.ok || result.error) {
-    els.promptOutput.textContent = result.error || `Prompt generation failed with ${response.status}`;
-    return;
-  }
-  els.promptOutput.textContent = result.prompt;
-  state.lastPrompt = { type, source: id, timestamp: new Date().toLocaleString() };
-  els.promptMeta.textContent = `${save ? 'Saved' : 'Previewed'} ${type} prompt for ${id} at ${state.lastPrompt.timestamp}.`;
-  setView('prompts');
-  if (save) {
+function selectedBacklogItems() {
+  const byId = new Map(state.items.map((item) => [item.id, item]));
+  return [...state.selectedIds].map((id) => byId.get(id)).filter(Boolean);
+}
+
+function setBulkButtonsDisabled(disabled) {
+  [els.bulkReleaseBtn, els.bulkPriorityBtn, els.bulkStatusBtn].forEach((button) => {
+    if (button) button.disabled = disabled;
+  });
+}
+
+async function bulkAssignSelectedRelease() {
+  const itemIds = [...state.selectedIds];
+  const release = els.bulkReleaseInput.value.trim() || 'Unassigned';
+  if (!itemIds.length) return showError('Select at least one backlog item.');
+  setBulkButtonsDisabled(true);
+  try {
+    const response = await fetch('/api/releases/assign', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ release, itemIds }),
+    });
+    const result = await response.json();
+    if (!response.ok || result.error) throw new Error(result.error || `Bulk release assignment failed with ${response.status}`);
+    state.selectedIds.clear();
     await loadBacklog();
     await loadReleases();
+    showError('');
+  } catch (error) {
+    showError(error.message || 'Bulk release assignment failed.');
+  } finally {
+    setBulkButtonsDisabled(false);
+  }
+}
+
+async function bulkUpdateSelectedItems(changes) {
+  const items = selectedBacklogItems();
+  if (!items.length) return showError('Select at least one backlog item.');
+  setBulkButtonsDisabled(true);
+  try {
+    for (const item of items) {
+      const payload = {
+        title: item.title,
+        status: changes.status ?? item.status,
+        priority: changes.priority ?? item.priority,
+        effort: item.effort || 'Unknown',
+        release: item.release || 'Unassigned',
+      };
+      const response = await fetch(`/api/backlog/items/${encodeURIComponent(item.id)}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok || result.error) throw new Error(result.error || `Bulk update failed for ${item.id} with ${response.status}`);
+    }
+    state.selectedIds.clear();
+    await loadBacklog();
+    await loadReleases();
+    showError('');
+  } catch (error) {
+    showError(error.message || 'Bulk update failed.');
+  } finally {
+    setBulkButtonsDisabled(false);
+  }
+}
+
+async function updateItemStatus(id, newStatus) {
+  const item = state.items.find((candidate) => candidate.id === id);
+  if (!item) return { error: `Item not found: ${id}` };
+  if (item.status === newStatus) return { noop: true };
+  const payload = {
+    title: item.title,
+    status: newStatus,
+    priority: item.priority,
+    effort: item.effort || 'Unknown',
+    release: item.release || 'Unassigned',
+  };
+  const response = await fetch(`/api/backlog/items/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return response.json();
+}
+
+async function generatePrompt(type, id, save, sourceType = '') {
+  try {
+    const response = await fetch('/api/prompts/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type, id, save, sourceType }) });
+    const result = await response.json();
+    closeItemModal();
+    if (!response.ok || result.error) {
+      els.promptOutput.textContent = result.error || `Prompt generation failed with ${response.status}`;
+      setView('prompts');
+      return false;
+    }
+    els.promptOutput.textContent = result.prompt;
+    state.lastPrompt = { type, source: id, timestamp: new Date().toLocaleString() };
+    els.promptMeta.textContent = `${save ? 'Saved' : 'Previewed'} ${type} prompt for ${id} at ${state.lastPrompt.timestamp}.`;
+    setView('prompts');
+    if (save) {
+      await loadBacklog();
+      await loadReleases();
+    }
+    return true;
+  } catch (error) {
+    closeItemModal();
+    els.promptOutput.textContent = error.message || 'Prompt generation failed.';
+    setView('prompts');
+    return false;
   }
 }
 
 async function generateChecklist(id, save) {
-  const response = await fetch('/api/checklists/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, save }) });
-  const result = await response.json();
-  if (!response.ok || result.error) {
-    els.promptOutput.textContent = result.error || `Checklist generation failed with ${response.status}`;
-    return;
+  try {
+    const response = await fetch('/api/checklists/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, save }) });
+    const result = await response.json();
+    if (!response.ok || result.error) {
+      els.promptOutput.textContent = result.error || `Checklist generation failed with ${response.status}`;
+      return false;
+    }
+    els.promptOutput.textContent = result.checklist;
+    state.lastPrompt = { type: 'checklist', source: id, timestamp: new Date().toLocaleString() };
+    els.promptMeta.textContent = `${save ? 'Saved' : 'Previewed'} human testing checklist for ${id} at ${state.lastPrompt.timestamp}.`;
+    setView('prompts');
+    if (save) await loadReleases();
+    return true;
+  } catch (error) {
+    els.promptOutput.textContent = error.message || 'Checklist generation failed.';
+    return false;
   }
-  els.promptOutput.textContent = result.checklist;
-  state.lastPrompt = { type: 'checklist', source: id, timestamp: new Date().toLocaleString() };
-  els.promptMeta.textContent = `${save ? 'Saved' : 'Previewed'} human testing checklist for ${id} at ${state.lastPrompt.timestamp}.`;
-  setView('prompts');
-  if (save) await loadReleases();
 }
 
 async function loadBacklog() {
@@ -828,6 +1549,14 @@ async function loadBacklog() {
     els.refreshBtn.disabled = false;
     els.refreshBtn.textContent = 'Refresh';
   }
+}
+
+async function reloadProjectData() {
+  await loadConfig();
+  await loadValidationMeta();
+  await loadBacklog();
+  await loadReleases();
+  await loadControlManager();
 }
 
 function applyFilter(field, value) {
@@ -863,14 +1592,125 @@ els.refreshReleasesBtn.addEventListener('click', loadReleases);
 els.releaseSearch.addEventListener('input', () => renderReleases(state.releases));
 els.assignReleaseBtn.addEventListener('click', assignSelectedToRelease);
 els.createReleaseBtn.addEventListener('click', createRelease);
-els.copyPromptBtn.addEventListener('click', () => navigator.clipboard?.writeText(els.promptOutput.textContent));
+els.copyPromptBtn.addEventListener('click', copyPromptToClipboard);
 els.generatePromptBtn.addEventListener('click', () => generatePromptFromWorkspace(false));
 els.savePromptBtn.addEventListener('click', () => generatePromptFromWorkspace(true));
 els.goReleasesBtn.addEventListener('click', () => setView('releases'));
+els.refreshControlManagerBtn.addEventListener('click', loadControlManager);
+els.controlManager.addEventListener('click', async (event) => {
+  if (event.target.closest('[data-control-preview]')) {
+    await previewControlPackage();
+    return;
+  }
+  const actionButton = event.target.closest('[data-control-action]');
+  if (actionButton) await runControlAction(actionButton.dataset.controlAction);
+});
+els.controlManager.addEventListener('input', (event) => {
+  if (event.target.id === 'controlConfirmation') updateControlActionButtons();
+});
+els.activeProjectSelect.addEventListener('change', (event) => setActiveProject(event.target.value));
+els.activeProjectButton.addEventListener('click', () => {
+  if (!els.activeProjectMenu) return;
+  els.activeProjectMenu.hidden = !els.activeProjectMenu.hidden;
+});
+els.activeProjectMenu.addEventListener('click', async (event) => {
+  const option = event.target.closest('[data-project-picker-id]');
+  if (!option) return;
+  els.activeProjectMenu.hidden = true;
+  await setActiveProject(option.dataset.projectPickerId);
+});
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('.project-picker') && els.activeProjectMenu) els.activeProjectMenu.hidden = true;
+});
+els.settingsPaths.addEventListener('click', async (event) => {
+  const browseBtn = event.target.closest('#browseProjectBtn');
+  if (browseBtn) {
+    await browseProjectPath();
+    return;
+  }
+  const analyzeBtn = event.target.closest('#analyzeProjectBtn');
+  if (analyzeBtn) {
+    await analyzeProject();
+    return;
+  }
+  const saveBtn = event.target.closest('#saveConfigBtn');
+  if (saveBtn) {
+    await saveProjectConfig();
+    return;
+  }
+  const newBtn = event.target.closest('#newProjectBtn');
+  if (newBtn) {
+    state.projectFormMode = 'new';
+    state.editingProjectId = '';
+    state.projectForm = { label: '', path: '', color: '#253858' };
+    state.projectAnalysis = null;
+    renderSettings();
+    return;
+  }
+  const colorBtn = event.target.closest('[data-color-choice]');
+  if (colorBtn) {
+    const labelInput = document.getElementById('settingsLabel');
+    const pathInput = document.getElementById('settingsPath');
+    state.projectForm = {
+      label: labelInput?.value?.trim() || '',
+      path: pathInput?.value?.trim() || '',
+      color: colorBtn.dataset.colorChoice || '#253858',
+    };
+    renderSettings();
+    return;
+  }
+  const editBtn = event.target.closest('[data-edit-project]');
+  if (editBtn) {
+    state.editingProjectId = editBtn.dataset.editProject;
+    state.projectFormMode = 'edit';
+    const project = state.config.projects.find((candidate) => candidate.id === state.editingProjectId);
+    state.projectForm = project ? { label: project.label || '', path: project.path || '', color: project.color || '#253858' } : { label: '', path: '', color: '#253858' };
+    state.projectAnalysis = null;
+    renderSettings();
+    return;
+  }
+  const cancelBtn = event.target.closest('#cancelProjectEditBtn');
+  if (cancelBtn) {
+    state.editingProjectId = '';
+    state.projectFormMode = '';
+    state.projectForm = { label: '', path: '', color: '#253858' };
+    state.projectAnalysis = null;
+    renderSettings();
+    return;
+  }
+  const activeBtn = event.target.closest('[data-set-active-project]');
+  if (activeBtn) {
+    await setActiveProject(activeBtn.dataset.setActiveProject);
+    return;
+  }
+  const removeBtn = event.target.closest('[data-remove-project]');
+  if (removeBtn) {
+    await removeProject(removeBtn.dataset.removeProject);
+    return;
+  }
+  const projectCard = event.target.closest('[data-card-project]');
+  if (projectCard) {
+    await setActiveProject(projectCard.dataset.cardProject);
+  }
+});
 els.searchFilter.addEventListener('input', (event) => applyFilter('search', event.target.value));
+els.typeFilter.addEventListener('change', (event) => applyFilter('type', event.target.value));
 els.statusFilter.addEventListener('change', (event) => applyFilter('status', event.target.value));
 els.priorityFilter.addEventListener('change', (event) => applyFilter('priority', event.target.value));
+els.effortFilter.addEventListener('change', (event) => applyFilter('effort', event.target.value));
+els.releaseFilter.addEventListener('change', (event) => applyFilter('release', event.target.value));
 els.folderFilter.addEventListener('change', (event) => applyFilter('folder', event.target.value));
+els.bulkReleaseBtn.addEventListener('click', bulkAssignSelectedRelease);
+els.bulkPriorityBtn.addEventListener('click', () => {
+  const priority = els.bulkPrioritySelect.value;
+  if (!priority) return showError('Choose a priority for the selected backlog items.');
+  return bulkUpdateSelectedItems({ priority });
+});
+els.bulkStatusBtn.addEventListener('click', () => {
+  const status = els.bulkStatusSelect.value;
+  if (!status) return showError('Choose a status for the selected backlog items.');
+  return bulkUpdateSelectedItems({ status });
+});
 els.sortSelect.addEventListener('change', (event) => {
   state.filters.sort = event.target.value;
   state.filters.sortDir = event.target.value === 'updated' ? 'desc' : 'asc';
@@ -897,12 +1737,24 @@ els.rows.addEventListener('click', (event) => {
     els.selectionCount.textContent = `${state.selectedIds.size} selected`;
     return;
   }
+  const statusPick = event.target.closest('[data-status-pick]');
+  if (statusPick) {
+    showStatusPicker(statusPick.dataset.statusPick, statusPick);
+    return;
+  }
   const opener = event.target.closest('[data-open-item]');
   const row = event.target.closest('tr[data-item-id]');
   const id = opener?.dataset.openItem || row?.dataset.itemId;
   if (id) openItemModal('view', id);
 });
 els.statusBoard.addEventListener('click', (event) => {
+  const overflow = event.target.closest('[data-board-status-filter]');
+  if (overflow) {
+    applyFilter('status', overflow.dataset.boardStatusFilter);
+    if (els.statusFilter) els.statusFilter.value = overflow.dataset.boardStatusFilter;
+    document.querySelector('.table-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
   const opener = event.target.closest('[data-open-item]');
   if (opener) openItemModal('view', opener.dataset.openItem);
 });
@@ -941,6 +1793,105 @@ els.releaseDetail.addEventListener('click', (event) => {
   if (vcPrompt) generatePrompt('version-control', vcPrompt.dataset.vcPromptRelease, false, 'release');
 });
 
-loadBacklog();
-loadValidationMeta();
-loadReleases();
+// ── Status picker (ENH-0007) ──────────────────────────────────────────────────
+
+const statusPickerEl = document.createElement('div');
+statusPickerEl.id = 'statusPicker';
+statusPickerEl.className = 'status-picker';
+statusPickerEl.hidden = true;
+document.body.appendChild(statusPickerEl);
+
+let statusPickerTargetId = '';
+
+function showStatusPicker(itemId, anchorEl) {
+  statusPickerTargetId = itemId;
+  statusPickerEl.innerHTML = STATUS_OPTIONS.map((status) =>
+    `<button type="button" class="status-picker-option" data-pick-status="${escapeHtml(status)}">${escapeHtml(status)}</button>`
+  ).join('');
+  statusPickerEl.hidden = false;
+  const rect = anchorEl.getBoundingClientRect();
+  const left = Math.min(rect.left + window.scrollX, window.innerWidth - 200);
+  statusPickerEl.style.top = `${rect.bottom + window.scrollY + 4}px`;
+  statusPickerEl.style.left = `${left}px`;
+}
+
+function hideStatusPicker() {
+  statusPickerEl.hidden = true;
+  statusPickerTargetId = '';
+}
+
+statusPickerEl.addEventListener('click', async (event) => {
+  const btn = event.target.closest('[data-pick-status]');
+  if (!btn || !statusPickerTargetId) return;
+  const newStatus = btn.dataset.pickStatus;
+  const id = statusPickerTargetId;
+  hideStatusPicker();
+  const result = await updateItemStatus(id, newStatus);
+  if (result.noop) return;
+  if (result.error) { showError(result.error); return; }
+  showError('');
+  await loadBacklog();
+  await loadReleases();
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !statusPickerEl.hidden) hideStatusPicker();
+});
+
+document.addEventListener('click', (event) => {
+  if (!statusPickerEl.hidden && !statusPickerEl.contains(event.target) && !event.target.closest('[data-status-pick]')) {
+    hideStatusPicker();
+  }
+});
+
+// ── Kanban drag-and-drop (FEAT-0019) ─────────────────────────────────────────
+
+let draggedItemId = '';
+
+els.statusBoard.addEventListener('dragstart', (event) => {
+  const card = event.target.closest('.board-card[draggable]');
+  if (!card) return;
+  draggedItemId = card.dataset.itemId;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', draggedItemId);
+  card.classList.add('dragging');
+});
+
+els.statusBoard.addEventListener('dragend', (event) => {
+  draggedItemId = '';
+  document.querySelectorAll('.board-column.drag-over').forEach((col) => col.classList.remove('drag-over'));
+  event.target.classList.remove('dragging');
+});
+
+els.statusBoard.addEventListener('dragover', (event) => {
+  const column = event.target.closest('[data-drop-status]');
+  if (!column || !draggedItemId) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  document.querySelectorAll('.board-column.drag-over').forEach((col) => { if (col !== column) col.classList.remove('drag-over'); });
+  column.classList.add('drag-over');
+});
+
+els.statusBoard.addEventListener('dragleave', (event) => {
+  const column = event.target.closest('[data-drop-status]');
+  if (!column) return;
+  if (!column.contains(event.relatedTarget)) column.classList.remove('drag-over');
+});
+
+els.statusBoard.addEventListener('drop', async (event) => {
+  const column = event.target.closest('[data-drop-status]');
+  if (!column || !draggedItemId) return;
+  event.preventDefault();
+  column.classList.remove('drag-over');
+  const newStatus = column.dataset.dropStatus;
+  const id = draggedItemId;
+  draggedItemId = '';
+  const result = await updateItemStatus(id, newStatus);
+  if (result.noop) return;
+  if (result.error) { showError(result.error); return; }
+  showError('');
+  await loadBacklog();
+  await loadReleases();
+});
+
+reloadProjectData();

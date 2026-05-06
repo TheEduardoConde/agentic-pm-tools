@@ -45,11 +45,13 @@ or:
 npm start -- --project "C:\path\to\repo\docs\project"
 ```
 
-When copied into another repository as `docs/pm/app`, the fallback target is:
+When copied into another repository, keep the app outside `docs/_methodology` and point it at the target project folder. If embedded two levels below the repository root, the fallback target is:
 
 ```text
 ../../project
 ```
+
+`pm-tools-config.json` stores local project selections and absolute paths. Treat it as machine-local runtime state, not portable methodology.
 
 ## Current Capabilities
 

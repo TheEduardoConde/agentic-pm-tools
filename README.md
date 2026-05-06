@@ -13,11 +13,9 @@ Agentic PM Tools is a portable markdown-based project management toolkit for sof
 ## What's Included
 
 - `app/`: standalone local PM Tools app
-- `methodology/`: reusable project-management standards
-- `templates/`: backlog, release, testing, security, and completion-report templates
-- `prompts/`: reusable agent prompts
+- `docs/_methodology/`: reusable read-only methodology, standards, templates, and prompts
 - `examples/project/`: fake sample project data for trying the app
-- `package/docs/pm/`: copy-ready package layout for dropping into another repository
+- `docs/project/`: this repository's project-specific PM data
 
 ## Quick Start
 
@@ -48,45 +46,89 @@ npm start
 npm start -- --project "C:\path\to\repo\docs\project"
 ```
 
-The target project should follow the structure documented in `methodology/PROJECT_STRUCTURE_STANDARD.md`.
+The target project should follow the structure documented in `docs/_methodology/PORTABILITY_STANDARD.md`.
 
-## Copy Into an Existing Project
+## Use With Other Projects
 
-To embed the portable package in another repository, copy:
+The recommended setup is to run this app once and point it at each target repository's PM data folder:
 
 ```text
-package/docs/pm
+C:\path\to\target-repo\docs\project
+```
+
+Each target repository should contain:
+
+```text
+docs/
+  _methodology/
+  project/
+```
+
+`docs/_methodology` contains portable read-only methodology, prompts, and templates. `docs/project` contains the target repository's backlog, requirements, test logs, release files, and other project-specific data.
+
+## Initialize an Existing Project
+
+To add the methodology to another repository, copy:
+
+```text
+docs/_methodology
 ```
 
 into the target repository as:
 
 ```text
-docs/pm
+docs/_methodology
 ```
 
-Project-specific data should live separately under:
+Then create project-specific working data under:
 
 ```text
 docs/project
 ```
 
-When the app is copied into `docs/pm/app`, its fallback target path is `../../project`.
+Recommended initial structure:
+
+```text
+docs/project/
+  CURRENT_STATE.md
+  BACKLOG.md
+  TEST_COMMANDS.md
+  REQUIREMENTS.md
+  TEST_LOG.md
+  DECISION_LOG.md
+  RELEASE_NOTES.md
+  .pm-meta.json
+
+  backlog/
+    active/
+    completed/
+    deferred/
+    archived/
+
+  releases/
+```
+
+## App Mode
+
+Copying the app into every project is optional. The methodology package should not contain app source code; keep the app outside `docs/_methodology` and point it at the target repository's `docs/project` folder.
+
+Do not copy local app state as project methodology. `app/pm-tools-config.json` stores machine-local project paths and should be treated as user-specific configuration.
 
 ## Project Folder Standard
 
-See `methodology/PROJECT_STRUCTURE_STANDARD.md`.
+See `docs/_methodology/PORTABILITY_STANDARD.md`.
 
 ## Backlog Item Format
 
-See `methodology/BACKLOG_STANDARD.md` and the templates in `templates/`.
+See `docs/_methodology/BACKLOG_STANDARD.md` and the templates in `docs/_methodology/templates/`.
 
 ## Release Workflow
 
-See `methodology/RELEASE_WORKFLOW.md`.
+See `docs/_methodology/RELEASE_STANDARD.md`.
 
 ## Codex Prompt Workflow
 
-See `methodology/CODEX_PROMPTING_STANDARD.md` and `prompts/`.
+Every LLM session should read `docs/_methodology/STARTUP.md` first, then load task-specific standards and prompts from `docs/_methodology/`.
 
 ## Validation Workflow
 

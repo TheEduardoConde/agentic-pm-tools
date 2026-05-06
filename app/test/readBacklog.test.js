@@ -1,25 +1,40 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
   createBacklogItem,
+  addProjectToConfig,
+  analyzeProjectPath,
   assignItemsToRelease,
+  createServer,
   createRelease,
   generateChecklist,
   generatePrompt,
   generateVersionControlPrompt,
+  buildControlApprovalPackage,
   getReleasePlanner,
   getNextSequenceNumber,
+  getPromotionRecommendations,
+  loadControlMethodology,
+  resolveGitRepoRoot,
+  runControlManagerAction,
   isValidReleaseVersion,
   parseBodySections,
   parseFrontMatter,
   prefixFromType,
+  readAppConfig,
   readBacklogItems,
+  removeProjectFromConfig,
+  setActiveProjectInConfig,
   slugifyTitle,
   typeFromPrefix,
   updateBacklogItem,
+  updateProjectInConfig,
+  updateRecentProjects,
   validateBacklog,
+  writeAppConfig,
 } from '../server.js';
 
 function runTest(name, fn) {
@@ -46,6 +61,27 @@ function makeProjectFixture() {
     migrationStatus: 'not_started',
   }, null, 2), 'utf8');
   return { dir, projectPath };
+}
+
+function makeGitProjectFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-tools-git-'));
+  const repoRoot = path.join(dir, 'repo');
+  const projectPath = path.join(repoRoot, 'docs', 'project');
+  for (const folder of ['active', 'completed', 'deferred', 'archived']) {
+    fs.mkdirSync(path.join(projectPath, 'backlog', folder), { recursive: true });
+  }
+  fs.mkdirSync(path.join(repoRoot, 'docs', '_methodology', 'prompts'), { recursive: true });
+  fs.writeFileSync(path.join(repoRoot, 'docs', '_methodology', 'STARTUP.md'), '# Methodology Startup\n\n- startup rule\n', 'utf8');
+  fs.writeFileSync(path.join(repoRoot, 'docs', '_methodology', 'DELIVERY_STANDARD.md'), '# Delivery Standard\n\n- dynamic rule\n', 'utf8');
+  fs.writeFileSync(path.join(repoRoot, 'docs', '_methodology', 'RELEASE_STANDARD.md'), '# Release Standard\n\n- release rule\n', 'utf8');
+  fs.writeFileSync(path.join(repoRoot, 'docs', '_methodology', 'prompts', 'version-control-manager.md'), '# Version-Control Manager\n\n- prompt rule\n', 'utf8');
+  execFileSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoRoot, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: repoRoot, stdio: 'ignore' });
+  fs.writeFileSync(path.join(repoRoot, 'README.md'), '# fixture\n', 'utf8');
+  execFileSync('git', ['add', 'README.md'], { cwd: repoRoot, stdio: 'ignore' });
+  execFileSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' });
+  return { dir, repoRoot, projectPath };
 }
 
 await runTest('parseFrontMatter extracts scalar fields', () => {
@@ -439,7 +475,7 @@ await runTest('updateBacklogItem sets archived date and archive reason', async (
     priority: 'Medium',
     effort: 'Unknown',
     release: 'Unassigned',
-    archiveReason: 'No longer needed.',
+    archive_reason: 'No longer needed.',
   }, projectPath);
 
   assert.match(result.item.archived, /^\d{4}-\d{2}-\d{2}$/);
@@ -465,12 +501,36 @@ await runTest('updateBacklogItem sets deferred date and defer reason', async () 
     priority: 'Medium',
     effort: 'Unknown',
     release: 'Unassigned',
-    deferReason: 'Wait for later.',
+    defer_reason: 'Wait for later.',
   }, projectPath);
 
   assert.match(result.item.deferred, /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(result.item.defer_reason, 'Wait for later.');
   assert.equal(result.item.folder, 'deferred');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('updateBacklogItem still accepts legacy camelCase archive and defer reasons', async () => {
+  const { dir, projectPath } = makeProjectFixture();
+  await createBacklogItem({
+    prefix: 'PM',
+    title: 'Legacy reasons',
+    summary: 'Summary.',
+    problemNeed: 'Need.',
+    expectedOutcome: 'Outcome.',
+    acceptanceCriteria: 'Criterion',
+  }, projectPath);
+
+  const archived = await updateBacklogItem('PM-0000', {
+    title: 'Legacy reasons',
+    status: 'Archived',
+    priority: 'Medium',
+    effort: 'Unknown',
+    release: 'Unassigned',
+    archiveReason: 'Legacy archive reason.',
+  }, projectPath);
+
+  assert.equal(archived.item.archive_reason, 'Legacy archive reason.');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -984,6 +1044,190 @@ await runTest('createRelease validates release version and prevents duplicates',
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+await runTest('POST /api/releases creates a release file', async () => {
+  const { dir, projectPath } = makeProjectFixture();
+  const server = createServer({ config: { projectPath, projectLabel: '', recentProjects: [] } });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const { port } = server.address();
+
+  const response = await fetch(`http://localhost:${port}/api/releases`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ version: 'v0.4.0' }),
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 201);
+  assert.equal(body.id, 'v0.4.0');
+  assert.ok(fs.existsSync(path.join(projectPath, 'releases', 'v0.4.0.md')));
+
+  await new Promise((resolve) => server.close(resolve));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('project registry API analyzes, adds, switches, and removes entries', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-config-'));
+  const configPath = path.join(dir, 'pm-tools-config.json');
+  const fixtureA = makeProjectFixture();
+  const fixtureB = makeProjectFixture();
+  await writeAppConfig({ activeProjectId: '', projects: [] }, configPath);
+  const server = createServer({ config: await readAppConfig(configPath), configPath });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const { port } = server.address();
+
+  const analysisResponse = await fetch(`http://localhost:${port}/api/projects/analyze`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: fixtureA.projectPath }),
+  });
+  const analysis = await analysisResponse.json();
+  assert.equal(analysisResponse.status, 200);
+  assert.equal(analysis.isValid, true);
+
+  const addAResponse = await fetch(`http://localhost:${port}/api/projects`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ label: 'Project A', path: fixtureA.projectPath, color: '#123456' }),
+  });
+  const addA = await addAResponse.json();
+  assert.equal(addAResponse.status, 201);
+  assert.equal(addA.projects.length, 1);
+
+  const addBResponse = await fetch(`http://localhost:${port}/api/projects`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ label: 'Project B', path: fixtureB.projectPath, color: '#654321' }),
+  });
+  const addB = await addBResponse.json();
+  assert.equal(addBResponse.status, 201);
+  const projectB = addB.projects.find((project) => project.label === 'Project B');
+
+  const switchResponse = await fetch(`http://localhost:${port}/api/config/active-project`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ activeProjectId: projectB.id }),
+  });
+  const switched = await switchResponse.json();
+  assert.equal(switchResponse.status, 200);
+  assert.equal(switched.activeProjectId, projectB.id);
+
+  const deleteResponse = await fetch(`http://localhost:${port}/api/projects/${encodeURIComponent(addA.project.id)}`, { method: 'DELETE' });
+  const deleted = await deleteResponse.json();
+  assert.equal(deleteResponse.status, 200);
+  assert.equal(deleted.projects.length, 1);
+  assert.ok(fs.existsSync(fixtureA.projectPath));
+
+  await new Promise((resolve) => server.close(resolve));
+  fs.rmSync(fixtureA.dir, { recursive: true, force: true });
+  fs.rmSync(fixtureB.dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('GET /api/config refreshes persisted project registry instead of stale startup config', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-config-'));
+  const configPath = path.join(dir, 'pm-tools-config.json');
+  const fixture = makeProjectFixture();
+  await writeAppConfig({
+    activeProjectId: 'project-stale',
+    projects: [{ id: 'project-stale', label: 'Stale', path: fixture.projectPath, color: '#253858' }],
+  }, configPath);
+  const server = createServer({ config: await readAppConfig(configPath), configPath });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const { port } = server.address();
+  await writeAppConfig({
+    activeProjectId: 'project-fresh',
+    projects: [{ id: 'project-fresh', label: 'Fresh', path: fixture.projectPath, color: '#b91c1c' }],
+  }, configPath);
+
+  const response = await fetch(`http://localhost:${port}/api/config`);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.activeProjectId, 'project-fresh');
+  assert.equal(body.projects[0].label, 'Fresh');
+  assert.equal(body.projects[0].color, '#b91c1c');
+
+  await new Promise((resolve) => server.close(resolve));
+  fs.rmSync(fixture.dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('resolveGitRepoRoot walks up from project data folder', async () => {
+  const { dir, repoRoot, projectPath } = makeGitProjectFixture();
+  const resolved = await resolveGitRepoRoot(projectPath);
+  assert.equal(resolved, repoRoot);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('loadControlMethodology reads docs/_methodology files dynamically', async () => {
+  const { dir, repoRoot } = makeGitProjectFixture();
+  const methodology = await loadControlMethodology(repoRoot);
+  assert.equal(methodology.warnings.length, 0);
+  assert.ok(methodology.files.find((file) => file.relativePath === 'docs/_methodology/DELIVERY_STANDARD.md')?.excerpt.includes('dynamic rule'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('getPromotionRecommendations includes only deploy-ready item statuses', async () => {
+  const { dir, projectPath } = makeGitProjectFixture();
+  await createBacklogItem({ prefix: 'PM', title: 'Ready deploy', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
+  await createBacklogItem({ prefix: 'BUG', title: 'Passed testing', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
+  await createBacklogItem({ prefix: 'FEAT', title: 'Not ready', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
+  await updateBacklogItem('PM-0000', { title: 'Ready deploy', status: 'Ready to Deploy', priority: 'Medium', effort: 'Unknown', release: 'v0.1.0' }, projectPath);
+  await updateBacklogItem('BUG-0001', { title: 'Passed testing', status: 'Passed Testing', priority: 'Medium', effort: 'Unknown', release: 'v0.1.0' }, projectPath);
+  const recommendations = await getPromotionRecommendations(projectPath);
+  assert.deepEqual(recommendations.items.map((item) => item.id).sort(), ['BUG-0001', 'PM-0000']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('control approval package identifies selected and unaccounted files', async () => {
+  const { dir, repoRoot, projectPath } = makeGitProjectFixture();
+  fs.appendFileSync(path.join(repoRoot, 'README.md'), 'included\n', 'utf8');
+  fs.writeFileSync(path.join(repoRoot, 'other.txt'), 'other\n', 'utf8');
+  const approval = await buildControlApprovalPackage(projectPath, { selectedFiles: ['README.md'], releaseId: 'v0.9.0' });
+  assert.deepEqual(approval.selectedFiles, ['README.md']);
+  assert.equal(approval.requiredConfirmations.commit, 'COMMIT v0.9.0');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('control manager mutating actions reject wrong typed confirmation', async () => {
+  const { dir, projectPath } = makeGitProjectFixture();
+  const result = await runControlManagerAction(projectPath, 'stage-selected', { selectedFiles: ['README.md'], confirmation: 'STAGE EVERYTHING' });
+  assert.equal(result.statusCode, 403);
+  assert.ok(result.expectedConfirmation.includes('STAGE SELECTED'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('control manager API exposes status, recommendations, package, and approval gate', async () => {
+  const { dir, projectPath } = makeGitProjectFixture();
+  await createBacklogItem({ prefix: 'PM', title: 'Ready API', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
+  await updateBacklogItem('PM-0000', { title: 'Ready API', status: 'Ready to Deploy', priority: 'Medium', effort: 'Unknown', release: 'v0.9.0' }, projectPath);
+  const server = createServer({ config: { projectPath, projectLabel: '', recentProjects: [] } });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const { port } = server.address();
+
+  const status = await (await fetch(`http://localhost:${port}/api/control-manager/status`)).json();
+  assert.ok(status.repoRoot);
+  const recommendations = await (await fetch(`http://localhost:${port}/api/control-manager/recommendations`)).json();
+  assert.equal(recommendations.itemCount, 1);
+  const approvalResponse = await fetch(`http://localhost:${port}/api/control-manager/approval-package`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ selectedFiles: ['docs/project/BACKLOG.md'], releaseId: 'v0.9.0' }),
+  });
+  const approval = await approvalResponse.json();
+  assert.equal(approvalResponse.status, 200);
+  assert.equal(approval.requiredConfirmations.commit, 'COMMIT v0.9.0');
+  const rejectedResponse = await fetch(`http://localhost:${port}/api/control-manager/actions/stage-selected`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ selectedFiles: ['docs/project/BACKLOG.md'], confirmation: 'WRONG' }),
+  });
+  assert.equal(rejectedResponse.status, 403);
+
+  await new Promise((resolve) => server.close(resolve));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 await runTest('getReleasePlanner lists historical non-version releases as reference', async () => {
   const { dir, projectPath } = makeProjectFixture();
   fs.mkdirSync(path.join(projectPath, 'releases'), { recursive: true });
@@ -1002,6 +1246,8 @@ await runTest('getReleasePlanner exposes release details and included item title
   const planner = await getReleasePlanner(projectPath);
   const release = planner.releases.find((candidate) => candidate.id === 'v0.3.0');
   assert.equal(release.items[0].title, 'Release detail item');
+  assert.equal(release.items[0].priority, 'Medium');
+  assert.equal(release.items[0].path, 'backlog/active/PM-0000-release-detail-item.md');
   assert.equal(release.statusCounts.Planned, 1);
   assert.equal(release.promptStatus.codexPromptGenerated, false);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -1023,6 +1269,11 @@ await runTest('UI static files expose combined Backlog Dashboard workspace and n
   assert.ok(html.includes('favicon.svg'));
   assert.ok(fs.existsSync(new URL('../favicon.svg', import.meta.url)));
   assert.ok(html.includes('Backlog Dashboard'));
+  assert.ok(html.includes('activeProjectSelect'));
+  assert.ok(html.includes('project-picker'));
+  assert.ok(!html.includes('dashboard-action-cards'));
+  assert.ok(html.includes('ctx-total'));
+  assert.ok(html.includes('ctx-completed'));
   assert.ok(html.includes('data-view-target="backlog"'));
   assert.ok(html.includes('data-view-target="releases"'));
   assert.ok(html.includes('data-view-target="validation"'));
@@ -1031,17 +1282,45 @@ await runTest('UI static files expose combined Backlog Dashboard workspace and n
   assert.ok(!html.includes('data-view-target="dashboard"'));
   assert.ok(!html.includes('data-view="dashboard"'));
   assert.ok(html.includes('Needs Attention'));
-  assert.ok(html.includes('Release Readiness'));
   assert.ok(html.includes('Recent Activity'));
-  assert.ok(html.includes('By Status'));
-  assert.ok(html.includes('By Priority'));
-  assert.ok(html.includes('By Type'));
+  assert.ok(!html.includes('Release Readiness'));
+  assert.ok(!html.includes('By Status'));
+  assert.ok(!html.includes('By Priority'));
+  assert.ok(!html.includes('By Type'));
   assert.ok(html.includes('Lifecycle Board'));
   assert.ok(html.includes('Release Workspace'));
   assert.ok(html.includes('Prompt Workspace'));
+  assert.ok(html.includes('Copy Prompt'));
   assert.ok(html.includes('Version Control Prompt'));
   assert.ok(html.includes('itemModal'));
   assert.ok(html.includes('Settings'));
+  assert.ok(html.includes('Projects'));
+  assert.ok(html.includes('Control Manager'));
+  assert.ok(html.includes('refreshControlManagerBtn'));
+  assert.ok(html.includes('controlManager'));
+  assert.ok(html.includes('activeProjectButton'));
+  assert.ok(html.includes('activeProjectSwatch'));
+  assert.ok(js.includes('/api/control-manager/status'));
+  assert.ok(js.includes('/api/control-manager/approval-package'));
+  assert.ok(js.includes('data-control-action="commit"'));
+  assert.ok(js.includes('Typed Approval'));
+  assert.ok(js.includes('/api/projects/analyze'));
+  assert.ok(js.includes('/api/projects/browse'));
+  assert.ok(js.includes('data-board-status-filter'));
+  assert.ok(js.includes('Generating...'));
+  assert.ok(js.includes('project-picker-option'));
+  assert.ok(html.includes('typeFilter'));
+  assert.ok(html.includes('releaseFilter'));
+  assert.ok(html.includes('bulkPriorityBtn'));
+  assert.ok(html.includes('bulkStatusBtn'));
+  assert.ok(html.includes('bulkReleaseBtn'));
+  assert.ok(js.includes('settingsColor'));
+  assert.ok(js.includes('browseProjectBtn'));
+  assert.ok(js.includes('Browse'));
+  assert.ok(js.includes('projectForm'));
+  assert.ok(js.includes('state.projectForm = {'));
+  assert.ok(js.includes('Remove Entry'));
+  assert.ok(js.includes('activeProjectSelect'));
   assert.ok(js.includes('Create Backlog Item'));
   assert.ok(js.includes('View Backlog Item'));
   assert.ok(js.includes('Edit Backlog Item'));
@@ -1051,6 +1330,9 @@ await runTest('UI static files expose combined Backlog Dashboard workspace and n
   assert.ok(js.includes('data-open-item'));
   assert.ok(js.includes('setView'));
   assert.ok(js.includes('sortSelect'));
+  assert.ok(js.includes('NON_INACTIVE_STATUS_FILTER'));
+  assert.ok(js.includes('copyPromptToClipboard'));
+  assert.ok(js.includes('releaseItemsTable'));
   assert.ok(!/Build Batch|Batch 00\d/.test(html));
 });
 
@@ -1096,4 +1378,298 @@ await runTest('readBacklogItems loads current project backlog without writing fi
   assert.ok(result.items.every((item) => item.folder), 'each item should include source folder');
   assert.ok(result.items.every((item) => item.rawBody !== undefined), 'each item should include raw markdown body');
   assert.ok(result.items.every((item) => item.sections), 'each item should include parsed sections');
+});
+
+// App Config
+
+await runTest('readAppConfig returns defaults when config file is missing', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-config-'));
+  const configPath = path.join(dir, 'pm-tools-config.json');
+
+  const result = await readAppConfig(configPath);
+
+  assert.equal(result.activeProjectId, '');
+  assert.equal(result.activeProject, null);
+  assert.equal(result.projectPath, '');
+  assert.equal(result.projectLabel, '');
+  assert.deepEqual(result.projects, []);
+  assert.deepEqual(result.recentProjects, []);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('readAppConfig returns persisted values when file exists', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-config-'));
+  const configPath = path.join(dir, 'pm-tools-config.json');
+  fs.writeFileSync(configPath, JSON.stringify({ projectPath: '/some/path', projectLabel: 'Test App', recentProjects: [{ path: '/old/path', label: 'Old', lastUsed: '2026-01-01' }] }), 'utf8');
+
+  const result = await readAppConfig(configPath);
+
+  assert.equal(result.projectPath, path.resolve('/some/path'));
+  assert.equal(result.projectLabel, 'Test App');
+  assert.equal(result.recentProjects.length, 1);
+  assert.equal(result.projects.length, 2);
+  assert.equal(result.projects[0].path, path.resolve('/some/path'));
+  assert.equal(result.recentProjects[0].path, path.resolve('/old/path'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('writeAppConfig creates the file and round-trips correctly', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-config-'));
+  const configPath = path.join(dir, 'pm-tools-config.json');
+
+  const written = await writeAppConfig({ projectPath: '/new/path', projectLabel: 'New App' }, configPath);
+
+  assert.equal(written.projectPath, path.resolve('/new/path'));
+  assert.equal(written.projectLabel, 'New App');
+  assert.deepEqual(written.recentProjects, []);
+  assert.equal(written.projects.length, 1);
+
+  const readBack = await readAppConfig(configPath);
+  assert.equal(readBack.projectPath, path.resolve('/new/path'));
+  assert.equal(readBack.projectLabel, 'New App');
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('writeAppConfig merges patch without stomping unrelated fields', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-config-'));
+  const configPath = path.join(dir, 'pm-tools-config.json');
+  await writeAppConfig({ projectPath: '/original', projectLabel: 'Original', recentProjects: [{ path: '/old', label: 'Old', lastUsed: '2026-01-01' }] }, configPath);
+
+  await writeAppConfig({ projectLabel: 'Updated Label' }, configPath);
+
+  const result = await readAppConfig(configPath);
+  assert.equal(result.projectPath, path.resolve('/original'));
+  assert.equal(result.projectLabel, 'Updated Label');
+  assert.equal(result.recentProjects.length, 1);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('analyzeProjectPath reports missing required project structure', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-analysis-'));
+  const projectPath = path.join(dir, 'project');
+  fs.mkdirSync(path.join(projectPath, 'backlog', 'active'), { recursive: true });
+
+  const result = await analyzeProjectPath(projectPath);
+
+  assert.equal(result.isValid, false);
+  assert.ok(result.counts.Error >= 3);
+  assert.ok(result.findings.some((finding) => finding.message.includes('Missing required backlog folder: backlog/completed')));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('analyzeProjectPath accepts repository root when docs/project contains PM data', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-analysis-'));
+  const repoRoot = path.join(dir, 'repo');
+  const projectPath = path.join(repoRoot, 'docs', 'project');
+  for (const folder of ['active', 'completed', 'deferred', 'archived']) {
+    fs.mkdirSync(path.join(projectPath, 'backlog', folder), { recursive: true });
+  }
+
+  const result = await analyzeProjectPath(repoRoot);
+
+  assert.equal(result.isValid, true);
+  assert.equal(result.projectPath, projectPath);
+  assert.ok(result.findings.some((finding) => finding.severity === 'Info' && finding.message.includes('Using PM data folder')));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('analyzeProjectPath accepts docs folder when project contains PM data', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-analysis-'));
+  const docsRoot = path.join(dir, 'repo', 'docs');
+  const projectPath = path.join(docsRoot, 'project');
+  for (const folder of ['active', 'completed', 'deferred', 'archived']) {
+    fs.mkdirSync(path.join(projectPath, 'backlog', folder), { recursive: true });
+  }
+
+  const result = await analyzeProjectPath(docsRoot);
+
+  assert.equal(result.isValid, true);
+  assert.equal(result.projectPath, projectPath);
+  assert.ok(result.findings.some((finding) => finding.severity === 'Info' && finding.path === 'project'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('addProjectToConfig saves valid projects with color after analysis', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-config-'));
+  const configPath = path.join(dir, 'pm-tools-config.json');
+  const fixture = makeProjectFixture();
+
+  const result = await addProjectToConfig({ label: 'Valid Project', path: fixture.projectPath, color: '#aa5500' }, configPath);
+
+  assert.equal(result.project.label, 'Valid Project');
+  assert.equal(result.project.color, '#aa5500');
+  assert.equal(result.config.activeProjectId, result.project.id);
+  assert.equal(result.config.projects.length, 1);
+  assert.equal(result.analysis.isValid, true);
+
+  fs.rmSync(fixture.dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('addProjectToConfig stores docs/project when given repository root', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-config-'));
+  const configPath = path.join(dir, 'pm-tools-config.json');
+  const repoRoot = path.join(dir, 'repo');
+  const projectPath = path.join(repoRoot, 'docs', 'project');
+  for (const folder of ['active', 'completed', 'deferred', 'archived']) {
+    fs.mkdirSync(path.join(projectPath, 'backlog', folder), { recursive: true });
+  }
+
+  const result = await addProjectToConfig({ label: 'Repo Root', path: repoRoot, color: '#225533' }, configPath);
+
+  assert.equal(result.analysis.isValid, true);
+  assert.equal(result.project.path, projectPath);
+  assert.equal(result.config.projectPath, projectPath);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('updateProjectInConfig saves updated project path after analysis', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-config-'));
+  const configPath = path.join(dir, 'pm-tools-config.json');
+  const first = makeProjectFixture();
+  const secondRoot = path.join(dir, 'second-repo');
+  const secondProjectPath = path.join(secondRoot, 'docs', 'project');
+  for (const folder of ['active', 'completed', 'deferred', 'archived']) {
+    fs.mkdirSync(path.join(secondProjectPath, 'backlog', folder), { recursive: true });
+  }
+  const added = await addProjectToConfig({ label: 'First', path: first.projectPath, color: '#335577' }, configPath);
+
+  const updated = await updateProjectInConfig(added.project.id, { label: 'Second', path: secondRoot, color: '#d6a21d' }, configPath);
+  const readBack = await readAppConfig(configPath);
+
+  assert.equal(updated.analysis.isValid, true);
+  assert.equal(updated.project.id, added.project.id);
+  assert.equal(updated.project.label, 'Second');
+  assert.equal(updated.project.color, '#d6a21d');
+  assert.equal(updated.project.path, secondProjectPath);
+  assert.equal(readBack.projects.find((project) => project.id === added.project.id).path, secondProjectPath);
+
+  fs.rmSync(first.dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('addProjectToConfig blocks invalid projects with detailed report', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-config-'));
+  const configPath = path.join(dir, 'pm-tools-config.json');
+  const invalidPath = path.join(dir, 'missing-project');
+
+  const result = await addProjectToConfig({ label: 'Invalid', path: invalidPath, color: '#123456' }, configPath);
+  const readBack = await readAppConfig(configPath);
+
+  assert.equal(result.statusCode, 400);
+  assert.equal(result.analysis.isValid, false);
+  assert.ok(result.analysis.findings.some((finding) => finding.suggestedFix));
+  assert.equal(readBack.projects.length, 0);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('removeProjectFromConfig removes registry entry without deleting project files', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-config-'));
+  const configPath = path.join(dir, 'pm-tools-config.json');
+  const fixture = makeProjectFixture();
+  const added = await addProjectToConfig({ label: 'Keep Files', path: fixture.projectPath, color: '#335577' }, configPath);
+  const marker = path.join(fixture.projectPath, 'backlog', 'active', 'PM-0001-keep.md');
+  fs.writeFileSync(marker, `---
+id: PM-0001
+prefix: PM
+number: 0001
+title: Keep
+status: New
+priority: Medium
+effort: Unknown
+release: Unassigned
+created: 2026-04-28
+updated: 2026-04-28
+---
+`, 'utf8');
+
+  const removed = await removeProjectFromConfig(added.project.id, configPath);
+
+  assert.equal(removed.config.projects.length, 0);
+  assert.ok(fs.existsSync(marker));
+
+  fs.rmSync(fixture.dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('setActiveProjectInConfig blocks invalid saved projects', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-config-'));
+  const configPath = path.join(dir, 'pm-tools-config.json');
+  const fixture = makeProjectFixture();
+  const invalidPath = path.join(dir, 'invalid-project');
+  fs.mkdirSync(invalidPath, { recursive: true });
+  await writeAppConfig({
+    activeProjectId: 'valid',
+    projects: [
+      { id: 'valid', label: 'Valid', path: fixture.projectPath, color: '#111111' },
+      { id: 'invalid', label: 'Invalid', path: invalidPath, color: '#222222' },
+    ],
+  }, configPath);
+
+  const result = await setActiveProjectInConfig('invalid', configPath);
+  const readBack = await readAppConfig(configPath);
+
+  assert.equal(result.statusCode, 400);
+  assert.equal(result.analysis.isValid, false);
+  assert.equal(readBack.activeProjectId, 'valid');
+
+  fs.rmSync(fixture.dir, { recursive: true, force: true });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('updateRecentProjects adds previousPath to front and removes duplicates', () => {
+  const existing = [
+    { path: '/path/a', label: 'A', lastUsed: '2026-01-01' },
+    { path: '/path/b', label: 'B', lastUsed: '2026-01-02' },
+  ];
+
+  const result = updateRecentProjects(existing, '/path/c', 'C');
+
+  assert.equal(result.length, 3);
+  assert.equal(result[0].path, '/path/c');
+  assert.equal(result[0].label, 'C');
+  assert.ok(result[0].lastUsed, 'lastUsed should be set');
+  assert.equal(result[1].path, '/path/a');
+  assert.equal(result[2].path, '/path/b');
+});
+
+await runTest('updateRecentProjects removes existing entry for previousPath before prepending', () => {
+  const existing = [
+    { path: '/path/a', label: 'A', lastUsed: '2026-01-01' },
+    { path: '/path/b', label: 'B', lastUsed: '2026-01-02' },
+  ];
+
+  const result = updateRecentProjects(existing, '/path/a', 'A updated');
+
+  assert.equal(result.length, 2, 'should not duplicate /path/a');
+  assert.equal(result[0].path, '/path/a');
+  assert.equal(result[0].label, 'A updated');
+  assert.equal(result[1].path, '/path/b');
+});
+
+await runTest('updateRecentProjects returns empty array when previousPath is falsy', () => {
+  const existing = [{ path: '/path/a', label: 'A', lastUsed: '2026-01-01' }];
+
+  const result = updateRecentProjects(existing, '', 'ignored');
+
+  assert.deepEqual(result, existing);
+});
+
+await runTest('updateRecentProjects caps result at 10 entries', () => {
+  const existing = Array.from({ length: 10 }, (_, i) => ({ path: `/old-${i}`, label: `Old ${i}`, lastUsed: `2026-01-${String(i + 1).padStart(2, '0')}` }));
+
+  const result = updateRecentProjects(existing, '/current', 'Current');
+
+  assert.equal(result.length, 10, 'should be capped at 10');
+  assert.equal(result[0].path, '/current', 'newest entry should be first');
+  assert.equal(result[9].path, '/old-8', 'entry 9 (oldest kept) should be /old-8, /old-9 should be trimmed');
 });

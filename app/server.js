@@ -2,12 +2,33 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = __dirname;
+export const APP_CONFIG_PATH = path.resolve(APP_ROOT, 'pm-tools-config.json');
+const DEFAULT_PROJECT_COLOR = '#253858';
+const execFileAsync = promisify(execFile);
+
+function readStartupAppConfig() {
+  try {
+    return JSON.parse(fsSync.readFileSync(APP_CONFIG_PATH, 'utf8'));
+  } catch {
+    return {};
+  }
+}
 
 function resolveDefaultProjectPath() {
+  const savedConfig = readStartupAppConfig();
+  if (Array.isArray(savedConfig.projects) && savedConfig.projects.length) {
+    const active = savedConfig.projects.find((project) => project.id === savedConfig.activeProjectId) || savedConfig.projects[0];
+    if (active?.path) return path.resolve(active.path);
+  }
+  if (savedConfig.projectPath) return path.resolve(savedConfig.projectPath);
+
   const projectArgIndex = process.argv.indexOf('--project');
   const cliProjectPath = projectArgIndex !== -1 ? process.argv[projectArgIndex + 1] : '';
   if (process.env.PM_TOOLS_PROJECT_PATH) return path.resolve(process.env.PM_TOOLS_PROJECT_PATH);
@@ -20,6 +41,7 @@ function resolveDefaultProjectPath() {
 }
 
 const DEFAULT_PROJECT_PATH = resolveDefaultProjectPath();
+const _startupConfig = readStartupAppConfig();
 const BACKLOG_FOLDERS = ['active', 'completed', 'deferred', 'archived'];
 const APPROVED_PREFIXES = [
   'FEAT',
@@ -127,7 +149,7 @@ const KNOWN_SECTION_TITLES = [
   'Human Testing Plan',
   'Codex Prompt',
   'Changed Files',
-  'Eddie Review Needed',
+  'Owner Review Needed',
   'Archive Note',
   'Defer Note',
   'Links',
@@ -351,7 +373,7 @@ export function validateCreateBacklogInput(input = {}) {
       implementationNotes: normalizeListText(input.implementationNotes),
       testingNotes: normalizeListText(input.testingNotes),
       humanTestingPlan: normalizeListText(input.humanTestingPlan),
-      eddieReviewNeeded: normalizeListText(input.eddieReviewNeeded),
+      ownerReviewNeeded: normalizeListText(input.ownerReviewNeeded),
       userStory: normalizeListText(input.userStory),
       links: normalizeListText(input.links),
     },
@@ -394,7 +416,7 @@ export function buildBacklogItemMarkdown(input, { id, number, date }) {
     + optionalSection('Implementation Notes', input.implementationNotes)
     + `\n## Testing Notes\n\n${input.testingNotes || 'Not specified yet.'}\n`
     + `\n## Human Testing Plan\n\n${input.humanTestingPlan || 'Not specified yet.'}\n`
-    + optionalSection('Eddie Review Needed', input.eddieReviewNeeded)
+    + optionalSection('Owner Review Needed', input.ownerReviewNeeded)
     + '\n## Codex Prompt\n\nNot generated yet.\n'
     + '\n## Changed Files\n\n- None yet.\n'
     + `\n## Links\n\n${input.links || '- None.'}\n`;
@@ -483,6 +505,111 @@ async function updateLastBacklogValidation(projectPath, date) {
   await atomicWriteFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`);
   return meta;
 }
+
+function normalizeProjectColor(value) {
+  const color = String(value ?? '').trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : DEFAULT_PROJECT_COLOR;
+}
+
+function projectIdFromPath(projectPath) {
+  const resolved = path.resolve(String(projectPath || DEFAULT_PROJECT_PATH));
+  const hash = crypto.createHash('sha1').update(resolved.toLowerCase()).digest('hex').slice(0, 16);
+  return `project-${hash || 'default'}`;
+}
+
+function normalizeProjectRecord(project = {}, fallback = {}) {
+  const rawPath = String(project.path || project.projectPath || fallback.path || '').trim();
+  const resolvedPath = rawPath ? path.resolve(rawPath) : '';
+  const label = String(project.label || project.projectLabel || fallback.label || (resolvedPath ? path.basename(resolvedPath) : '') || 'Project').trim();
+  return {
+    id: String(project.id || fallback.id || projectIdFromPath(resolvedPath || label)).trim(),
+    label,
+    path: resolvedPath,
+    color: normalizeProjectColor(project.color || fallback.color),
+    lastValidatedAt: project.lastValidatedAt || fallback.lastValidatedAt || '',
+    lastUsedAt: project.lastUsedAt || fallback.lastUsedAt || '',
+  };
+}
+
+function dedupeProjects(projects = []) {
+  const byPath = new Map();
+  for (const project of projects) {
+    const normalized = normalizeProjectRecord(project);
+    if (!normalized.path) continue;
+    const key = path.resolve(normalized.path).toLowerCase();
+    byPath.set(key, { ...(byPath.get(key) || {}), ...normalized });
+  }
+  return [...byPath.values()];
+}
+
+export function normalizeAppConfig(cfg = {}) {
+  const projects = [];
+  if (Array.isArray(cfg.projects)) projects.push(...cfg.projects);
+  if (cfg.projectPath) {
+    projects.push({
+      id: cfg.activeProjectId || projectIdFromPath(cfg.projectPath),
+      label: cfg.projectLabel || '',
+      path: cfg.projectPath,
+      color: cfg.projectColor || DEFAULT_PROJECT_COLOR,
+      lastUsedAt: cfg.lastUsedAt || '',
+    });
+  }
+  if (Array.isArray(cfg.recentProjects)) {
+    for (const recent of cfg.recentProjects) {
+      projects.push({
+        label: recent.label || '',
+        path: recent.path || '',
+        color: recent.color || DEFAULT_PROJECT_COLOR,
+        lastUsedAt: recent.lastUsed || recent.lastUsedAt || '',
+      });
+    }
+  }
+
+  const normalizedProjects = dedupeProjects(projects);
+  const activeProject = normalizedProjects.find((project) => project.id === cfg.activeProjectId)
+    || normalizedProjects.find((project) => cfg.projectPath && path.resolve(project.path).toLowerCase() === path.resolve(cfg.projectPath).toLowerCase())
+    || normalizedProjects[0]
+    || null;
+
+  return {
+    activeProjectId: activeProject?.id || '',
+    projects: normalizedProjects,
+    activeProject,
+    projectPath: activeProject?.path || '',
+    projectLabel: activeProject?.label || '',
+    recentProjects: normalizedProjects
+      .filter((project) => project.id !== activeProject?.id)
+      .map((project) => ({ path: project.path, label: project.label, lastUsed: project.lastUsedAt || '' })),
+  };
+}
+
+export async function readAppConfig(configPath = APP_CONFIG_PATH) {
+  try {
+    const raw = await fs.readFile(configPath, 'utf8');
+    return normalizeAppConfig(JSON.parse(raw));
+  } catch (error) {
+    if (error.code === 'ENOENT') return normalizeAppConfig({});
+    throw error;
+  }
+}
+
+export async function writeAppConfig(patch, configPath = APP_CONFIG_PATH) {
+  const current = await readAppConfig(configPath);
+  const nextConfig = Array.isArray(patch.projects)
+    ? { activeProjectId: patch.activeProjectId ?? current.activeProjectId, projects: patch.projects }
+    : { ...current, ...patch };
+  const updated = normalizeAppConfig(nextConfig);
+  await atomicWriteFile(configPath, `${JSON.stringify({
+    activeProjectId: updated.activeProjectId,
+    projects: updated.projects,
+  }, null, 2)}\n`);
+  return updated;
+}
+
+export const runtimeConfig = normalizeAppConfig({
+  ..._startupConfig,
+  projectPath: _startupConfig.projectPath || DEFAULT_PROJECT_PATH,
+});
 
 function assertWithin(parent, child) {
   const relative = path.relative(parent, child);
@@ -762,6 +889,174 @@ export async function validateBacklog(projectPath = DEFAULT_PROJECT_PATH, { upda
   };
 }
 
+function analysisCounts(findings) {
+  return findings.reduce((acc, finding) => {
+    acc[finding.severity] = (acc[finding.severity] ?? 0) + 1;
+    return acc;
+  }, { Error: 0, Warning: 0, Info: 0 });
+}
+
+async function hasRequiredBacklogFolders(projectPath) {
+  for (const folder of BACKLOG_FOLDERS) {
+    try {
+      const stat = await fs.stat(path.join(projectPath, 'backlog', folder));
+      if (!stat.isDirectory()) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function resolveProjectDataPath(inputPath) {
+  const requested = path.resolve(String(inputPath ?? '').trim());
+  const candidates = [
+    { path: requested, inferred: false },
+    { path: path.join(requested, 'project'), inferred: true },
+    { path: path.join(requested, 'docs', 'project'), inferred: true },
+  ];
+  for (const candidate of candidates) {
+    if (await hasRequiredBacklogFolders(candidate.path)) {
+      return { requested, resolved: candidate.path, inferred: candidate.inferred };
+    }
+  }
+  return { requested, resolved: requested, inferred: false };
+}
+
+export async function analyzeProjectPath(projectPath) {
+  const pathText = String(projectPath ?? '').trim();
+  const { requested, resolved, inferred } = pathText ? await resolveProjectDataPath(pathText) : { requested: '', resolved: '', inferred: false };
+  const findings = [];
+  if (!pathText) {
+    findings.push(validationFinding('Error', 'Project path is required.', {
+      suggestedFix: 'Enter the absolute path to the project PM folder, such as docs/project.',
+    }));
+    const counts = analysisCounts(findings);
+    return { projectPath: '', analyzedAt: currentIsoTimestamp(), isValid: false, counts, findings };
+  }
+
+  if (inferred) {
+    findings.push(validationFinding('Info', `Using PM data folder ${path.relative(requested, resolved).split(path.sep).join('/')} inside the selected project.`, {
+      path: path.relative(requested, resolved).split(path.sep).join('/'),
+      suggestedFix: 'No action needed. Save will point to this docs/project folder.',
+    }));
+  }
+
+  try {
+    const stat = await fs.stat(resolved);
+    if (!stat.isDirectory()) {
+      findings.push(validationFinding('Error', `Project path is not a directory: ${resolved}.`, {
+        path: resolved,
+        suggestedFix: 'Choose a folder that contains the PM project files.',
+      }));
+    }
+  } catch {
+    findings.push(validationFinding('Error', `Project path does not exist: ${resolved}.`, {
+      path: resolved,
+      suggestedFix: 'Create the project PM folder or correct the path.',
+    }));
+  }
+
+  for (const folder of BACKLOG_FOLDERS) {
+    const folderPath = path.join(resolved, 'backlog', folder);
+    try {
+      const stat = await fs.stat(folderPath);
+      if (!stat.isDirectory()) {
+        findings.push(validationFinding('Error', `Required backlog folder is not a directory: backlog/${folder}.`, {
+          path: path.relative(resolved, folderPath).split(path.sep).join('/'),
+          suggestedFix: `Create a directory at backlog/${folder}.`,
+        }));
+      }
+    } catch {
+      findings.push(validationFinding('Error', `Missing required backlog folder: backlog/${folder}.`, {
+        path: `backlog/${folder}`,
+        suggestedFix: `Create ${path.join(resolved, 'backlog', folder)}.`,
+      }));
+    }
+  }
+
+  if (!findings.some((finding) => finding.severity === 'Error')) {
+    const validation = await validateBacklog(resolved, { updateMeta: false });
+    findings.push(...validation.findings);
+  }
+
+  const counts = analysisCounts(findings);
+  return {
+    projectPath: resolved,
+    analyzedAt: currentIsoTimestamp(),
+    isValid: counts.Error === 0,
+    counts,
+    findings,
+  };
+}
+
+export async function addProjectToConfig(input = {}, configPath = APP_CONFIG_PATH) {
+  const current = await readAppConfig(configPath);
+  const analysis = await analyzeProjectPath(input.path);
+  if (!analysis.isValid) return { error: 'Project analysis found structural errors.', statusCode: 400, analysis };
+  const project = normalizeProjectRecord({
+    label: input.label,
+    path: analysis.projectPath,
+    color: input.color,
+    lastValidatedAt: analysis.analyzedAt,
+    lastUsedAt: currentIsoTimestamp(),
+  });
+  const projects = dedupeProjects([...current.projects.filter((existing) => path.resolve(existing.path).toLowerCase() !== project.path.toLowerCase()), project]);
+  const updated = normalizeAppConfig({
+    activeProjectId: current.activeProjectId || project.id,
+    projects,
+  });
+  await atomicWriteFile(configPath, `${JSON.stringify({ activeProjectId: updated.activeProjectId, projects: updated.projects }, null, 2)}\n`);
+  return { config: updated, project, analysis };
+}
+
+export async function updateProjectInConfig(id, input = {}, configPath = APP_CONFIG_PATH) {
+  const current = await readAppConfig(configPath);
+  const existing = current.projects.find((project) => project.id === id);
+  if (!existing) return { error: `Project not found: ${id}`, statusCode: 404 };
+  const nextPath = input.path ?? existing.path;
+  const analysis = await analyzeProjectPath(nextPath);
+  if (!analysis.isValid) return { error: 'Project analysis found structural errors.', statusCode: 400, analysis };
+  const updatedProject = normalizeProjectRecord({
+    ...existing,
+    label: input.label ?? existing.label,
+    path: analysis.projectPath,
+    color: input.color ?? existing.color,
+    lastValidatedAt: analysis.analyzedAt,
+  }, existing);
+  const projects = current.projects.map((project) => (project.id === id ? updatedProject : project));
+  const updated = normalizeAppConfig({ activeProjectId: current.activeProjectId, projects });
+  await atomicWriteFile(configPath, `${JSON.stringify({ activeProjectId: updated.activeProjectId, projects: updated.projects }, null, 2)}\n`);
+  return { config: updated, project: updatedProject, analysis };
+}
+
+export async function removeProjectFromConfig(id, configPath = APP_CONFIG_PATH) {
+  const current = await readAppConfig(configPath);
+  const project = current.projects.find((candidate) => candidate.id === id);
+  if (!project) return { error: `Project not found: ${id}`, statusCode: 404 };
+  const projects = current.projects.filter((candidate) => candidate.id !== id);
+  const updated = normalizeAppConfig({
+    activeProjectId: current.activeProjectId === id ? projects[0]?.id || '' : current.activeProjectId,
+    projects,
+  });
+  await atomicWriteFile(configPath, `${JSON.stringify({ activeProjectId: updated.activeProjectId, projects: updated.projects }, null, 2)}\n`);
+  return { config: updated, removedProject: project };
+}
+
+export async function setActiveProjectInConfig(id, configPath = APP_CONFIG_PATH) {
+  const current = await readAppConfig(configPath);
+  const project = current.projects.find((candidate) => candidate.id === id);
+  if (!project) return { error: `Project not found: ${id}`, statusCode: 404 };
+  const analysis = await analyzeProjectPath(project.path);
+  if (!analysis.isValid) return { error: 'Project analysis found structural errors.', statusCode: 400, analysis };
+  const projects = current.projects.map((candidate) => (
+    candidate.id === id ? { ...candidate, lastValidatedAt: analysis.analyzedAt, lastUsedAt: currentIsoTimestamp() } : candidate
+  ));
+  const updated = normalizeAppConfig({ activeProjectId: id, projects });
+  await atomicWriteFile(configPath, `${JSON.stringify({ activeProjectId: updated.activeProjectId, projects: updated.projects }, null, 2)}\n`);
+  return { config: updated, activeProject: updated.activeProject, analysis };
+}
+
 export async function createBacklogItem(input, projectPath = DEFAULT_PROJECT_PATH) {
   const validation = validateCreateBacklogInput(input);
   if (!validation.ok) {
@@ -857,14 +1152,16 @@ function validateEditBacklogInput(input = {}, original = {}) {
     ['implementationNotes', 'implementationNotes'],
     ['testingNotes', 'testingNotes'],
     ['humanTestingPlan', 'humanTestingPlan'],
-    ['eddieReviewNeeded', 'eddieReviewNeeded'],
+    ['ownerReviewNeeded', 'ownerReviewNeeded'],
     ['links', 'links'],
-    ['archiveReason', 'archiveReason'],
-    ['deferReason', 'deferReason'],
+    ['archive_reason', 'archive_reason'],
+    ['defer_reason', 'defer_reason'],
   ];
   for (const [source, target] of optionalFields) {
     if (Object.hasOwn(input, source)) value[target] = normalizeListText(input[source]);
   }
+  if (Object.hasOwn(input, 'archiveReason')) value.archive_reason = normalizeListText(input.archiveReason);
+  if (Object.hasOwn(input, 'deferReason')) value.defer_reason = normalizeListText(input.deferReason);
 
   return {
     ok: errors.length === 0,
@@ -892,11 +1189,11 @@ function buildEditedBacklogMarkdown(original, input, date) {
   if (input.status === 'Deployed' && !fm.deployed) fm.deployed = date;
   if (input.status === 'Archived') {
     if (!fm.archived) fm.archived = date;
-    if (input.archiveReason) fm.archive_reason = input.archiveReason;
+    if (input.archive_reason) fm.archive_reason = input.archive_reason;
   }
   if (input.status === 'Deferred') {
     if (!fm.deferred) fm.deferred = date;
-    if (input.deferReason) fm.defer_reason = input.deferReason;
+    if (input.defer_reason) fm.defer_reason = input.defer_reason;
   }
 
   const frontMatter = [
@@ -935,7 +1232,7 @@ function buildEditedBacklogMarkdown(original, input, date) {
     sectionBlock('Implementation Notes', editedSectionContent(input, original, 'Implementation Notes', 'implementationNotes')),
     sectionBlock('Testing Notes', editedSectionContent(input, original, 'Testing Notes', 'testingNotes')),
     sectionBlock('Human Testing Plan', editedSectionContent(input, original, 'Human Testing Plan', 'humanTestingPlan')),
-    sectionBlock('Eddie Review Needed', editedSectionContent(input, original, 'Eddie Review Needed', 'eddieReviewNeeded')),
+    sectionBlock('Owner Review Needed', editedSectionContent(input, original, 'Owner Review Needed', 'ownerReviewNeeded')),
     sectionBlock('Codex Prompt', preserved('Codex Prompt')),
     sectionBlock('Changed Files', preserved('Changed Files')),
     sectionBlock('Links', editedSectionContent(input, original, 'Links', 'links')),
@@ -1216,7 +1513,17 @@ export async function getReleasePlanner(projectPath = DEFAULT_PROJECT_PATH) {
     releases: releases.map((release) => {
       const items = release.itemIds.map((id) => {
         const item = itemById.get(id);
-        return { id, title: item?.title || '(missing item)', status: item?.status || 'Missing' };
+        return {
+          id,
+          title: item?.title || '(missing item)',
+          status: item?.status || 'Missing',
+          priority: item?.priority || '',
+          effort: item?.effort || '',
+          release: item?.release || '',
+          updated: item?.updated || '',
+          folder: item?.folder || '',
+          path: item?.path || '',
+        };
       });
       return {
         id: release.id,
@@ -1262,11 +1569,16 @@ export async function createRelease(version, projectPath = DEFAULT_PROJECT_PATH)
   return { id: release, path: publicItemPath(projectPath, releasePath), created: true };
 }
 
-const SCOPE_RULE = 'Do not redesign, refactor, restructure, or expand scope unless the backlog item explicitly requires it. If you believe redesign, refactor, restructuring, or scope expansion is necessary, stop and ask Eddie first.';
-const VC_RULE = "Do not commit, push, merge, rebase, force push, deploy, create a release, or create a tag without Eddie's explicit approval.";
+const SCOPE_RULE = 'Do not redesign, refactor, restructure, or expand scope unless the backlog item explicitly requires it. If scope expansion is necessary, stop and ask the requester.';
+const VC_RULE = 'Do not commit, push, merge, rebase, force push, deploy, create a release, or create a tag without explicit approval from the project owner or authorized reviewer.';
 
 export function generateItemCodexPrompt(item) {
   return `You are working in this repository using the project PM methodology.
+
+Methodology files to read first:
+- ./docs/_methodology/STARTUP.md
+- ./docs/_methodology/BACKLOG_STANDARD.md
+- ./docs/_methodology/DELIVERY_STANDARD.md
 
 Source-of-truth files:
 - ./docs/project/${item.path}
@@ -1296,6 +1608,12 @@ ${VC_RULE}`;
 
 export function generateReleaseCodexPrompt(release, items) {
   return `You are working in this repository using the project PM methodology.
+
+Methodology files to read first:
+- ./docs/_methodology/STARTUP.md
+- ./docs/_methodology/BACKLOG_STANDARD.md
+- ./docs/_methodology/DELIVERY_STANDARD.md
+- ./docs/_methodology/RELEASE_STANDARD.md
 
 Source-of-truth files:
 - ./docs/project/releases/${release.fileName}
@@ -1418,6 +1736,286 @@ export async function generateChecklist(input = {}, projectPath = DEFAULT_PROJEC
   return { id: release.id, checklist, saved: Boolean(input.save) };
 }
 
+async function pathExists(targetPath) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function resolveGitRepoRoot(startPath) {
+  let current = path.resolve(startPath || DEFAULT_PROJECT_PATH);
+  try {
+    const stat = await fs.stat(current);
+    if (!stat.isDirectory()) current = path.dirname(current);
+  } catch {
+    current = path.dirname(current);
+  }
+  while (true) {
+    if (await pathExists(path.join(current, '.git'))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return '';
+    current = parent;
+  }
+}
+
+function methodologyExcerpt(content) {
+  return String(content || '')
+    .split(/\r?\n/)
+    .filter((line) => /^#{1,3}\s+/.test(line) || /^-\s+/.test(line))
+    .slice(0, 12)
+    .join('\n');
+}
+
+export async function loadControlMethodology(repoRoot) {
+  const files = [
+    { key: 'startup', label: 'Methodology Startup', relativePath: 'docs/_methodology/STARTUP.md' },
+    { key: 'delivery', label: 'Delivery Standard', relativePath: 'docs/_methodology/DELIVERY_STANDARD.md' },
+    { key: 'release', label: 'Release Standard', relativePath: 'docs/_methodology/RELEASE_STANDARD.md' },
+    { key: 'managerPrompt', label: 'Version-Control Manager Prompt', relativePath: 'docs/_methodology/prompts/version-control-manager.md' },
+  ];
+  const loaded = [];
+  const warnings = [];
+  for (const file of files) {
+    const absolutePath = path.join(repoRoot, file.relativePath);
+    try {
+      const content = await fs.readFile(absolutePath, 'utf8');
+      loaded.push({ ...file, path: absolutePath, found: true, excerpt: methodologyExcerpt(content), updatedAt: (await fs.stat(absolutePath)).mtime.toISOString() });
+    } catch {
+      loaded.push({ ...file, path: absolutePath, found: false, excerpt: '', updatedAt: '' });
+      warnings.push(`Missing methodology file: ${file.relativePath}`);
+    }
+  }
+  return { files: loaded, warnings };
+}
+
+function parseGitStatus(porcelain = '') {
+  return porcelain.split(/\r?\n/).filter(Boolean).map((line) => {
+    const index = line[0] || ' ';
+    const worktree = line[1] || ' ';
+    const rawPath = line.slice(3).trim();
+    const filePath = rawPath.includes(' -> ') ? rawPath.split(' -> ').pop() : rawPath;
+    return { index, worktree, path: filePath, staged: index !== ' ' && index !== '?', unstaged: worktree !== ' ', untracked: index === '?' && worktree === '?' };
+  });
+}
+
+async function gitExec(repoRoot, args) {
+  try {
+    const gitBin = process.platform === 'win32' ? 'git.exe' : 'git';
+    const { stdout, stderr } = await execFileAsync(gitBin, args, { cwd: repoRoot, windowsHide: true, maxBuffer: 1024 * 1024 * 4 });
+    return { ok: true, stdout: stdout.trim(), stderr: stderr.trim() };
+  } catch (error) {
+    return { ok: false, stdout: error.stdout?.trim() || '', stderr: error.stderr?.trim() || error.message, code: error.code || 1 };
+  }
+}
+
+async function ghExec(repoRoot, args) {
+  try {
+    const ghBin = process.platform === 'win32' ? 'gh.exe' : 'gh';
+    const { stdout, stderr } = await execFileAsync(ghBin, args, { cwd: repoRoot, windowsHide: true, maxBuffer: 1024 * 1024 * 4 });
+    return { ok: true, stdout: stdout.trim(), stderr: stderr.trim() };
+  } catch (error) {
+    return { ok: false, stdout: error.stdout?.trim() || '', stderr: error.stderr?.trim() || error.message, code: error.code || 1 };
+  }
+}
+
+async function readTestCommands(repoRoot) {
+  const testPath = path.join(repoRoot, 'docs', 'project', 'TEST_COMMANDS.md');
+  try {
+    const content = await fs.readFile(testPath, 'utf8');
+    const commands = content.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#')).slice(0, 12);
+    return { path: testPath, missing: false, commands };
+  } catch {
+    return {
+      path: testPath,
+      missing: true,
+      commands: ['node --check app/server.js', 'node --check app/src/app.js', 'npm run check'],
+      warning: 'docs/project/TEST_COMMANDS.md is missing; inferred likely app validation commands.',
+    };
+  }
+}
+
+export async function getControlManagerStatus(projectPath = DEFAULT_PROJECT_PATH) {
+  const repoRoot = await resolveGitRepoRoot(projectPath);
+  if (!repoRoot) return { error: 'Could not resolve a Git repository for the active project.', statusCode: 404 };
+  const [branch, upstream, porcelain, remotes, methodology, tests] = await Promise.all([
+    gitExec(repoRoot, ['branch', '--show-current']),
+    gitExec(repoRoot, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']),
+    gitExec(repoRoot, ['status', '--porcelain=v1']),
+    gitExec(repoRoot, ['remote', '-v']),
+    loadControlMethodology(repoRoot),
+    readTestCommands(repoRoot),
+  ]);
+  const changedFiles = parseGitStatus(porcelain.stdout);
+  const warnings = [...methodology.warnings];
+  if (tests.missing) warnings.push(tests.warning);
+  if (!upstream.ok) warnings.push('Current branch has no upstream or upstream could not be resolved.');
+  if (!porcelain.ok) warnings.push(`Git status failed: ${porcelain.stderr || 'unknown error'}`);
+  if (!branch.ok) warnings.push(`Git branch inspection failed: ${branch.stderr || 'unknown error'}`);
+  if (!remotes.ok) warnings.push(`Git remote inspection failed: ${remotes.stderr || 'unknown error'}`);
+  return {
+    repoRoot,
+    branch: branch.stdout || '',
+    upstream: upstream.ok ? upstream.stdout : '',
+    remotes: remotes.stdout.split(/\r?\n/).filter(Boolean),
+    changedFiles,
+    stagedFiles: changedFiles.filter((file) => file.staged),
+    dirty: changedFiles.length > 0,
+    methodology,
+    tests,
+    warnings,
+  };
+}
+
+export async function getPromotionRecommendations(projectPath = DEFAULT_PROJECT_PATH) {
+  const backlog = await readBacklogItems(projectPath);
+  const eligibleStatuses = new Set(['Ready to Deploy', 'Passed Testing']);
+  const items = backlog.items
+    .filter((item) => eligibleStatuses.has(item.status))
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      status: item.status,
+      release: item.release || 'Unassigned',
+      priority: item.priority,
+      path: item.path,
+      reason: `${item.status} is eligible for promotion under the methodology.`,
+    }));
+  const byRelease = items.reduce((acc, item) => {
+    const release = item.release || 'Unassigned';
+    if (!acc[release]) acc[release] = [];
+    acc[release].push(item);
+    return acc;
+  }, {});
+  return { eligibleStatuses: [...eligibleStatuses], itemCount: items.length, items, byRelease };
+}
+
+function secretScanFinding(filePath, content) {
+  const findings = [];
+  if (/\.env($|\.)/i.test(filePath)) findings.push(`${filePath}: environment file should not be committed without review.`);
+  if (/-----BEGIN (RSA |DSA |EC |OPENSSH |)PRIVATE KEY-----/.test(content)) findings.push(`${filePath}: private key material detected.`);
+  if (/(ghp|github_pat|sk-[A-Za-z0-9]|xox[baprs]-)[A-Za-z0-9_\-]{20,}/.test(content)) findings.push(`${filePath}: token-like secret detected.`);
+  if (/(api[_-]?key|secret|password)\s*[:=]\s*['"]?[A-Za-z0-9_\-]{16,}/i.test(content)) findings.push(`${filePath}: credential-like assignment detected.`);
+  return findings;
+}
+
+async function scanFilesForSecrets(repoRoot, files = []) {
+  const findings = [];
+  for (const file of files) {
+    const absolutePath = path.resolve(repoRoot, file);
+    if (!absolutePath.startsWith(repoRoot)) {
+      findings.push(`${file}: path is outside repository.`);
+      continue;
+    }
+    try {
+      const stat = await fs.stat(absolutePath);
+      if (!stat.isFile() || stat.size > 1024 * 1024) continue;
+      findings.push(...secretScanFinding(file, await fs.readFile(absolutePath, 'utf8')));
+    } catch {
+      // Deleted files or inaccessible files are handled by Git and do not need content scanning.
+    }
+  }
+  return findings;
+}
+
+export async function buildControlApprovalPackage(projectPath = DEFAULT_PROJECT_PATH, input = {}) {
+  const status = await getControlManagerStatus(projectPath);
+  if (status.error) return status;
+  const recommendations = await getPromotionRecommendations(projectPath);
+  const selectedFiles = [...new Set((input.selectedFiles || []).map((file) => String(file).trim()).filter(Boolean))];
+  const excludedFiles = [...new Set((input.excludedFiles || []).map((file) => String(file).trim()).filter(Boolean))];
+  const changedPaths = status.changedFiles.map((file) => file.path);
+  const unaccountedFiles = changedPaths.filter((file) => !selectedFiles.includes(file) && !excludedFiles.includes(file));
+  const releaseId = String(input.releaseId || '').trim();
+  const branchName = String(input.branchName || (releaseId ? `release/${releaseId}` : '')).trim();
+  const commitMessage = String(input.commitMessage || (releaseId ? `feat: deliver release ${releaseId}` : 'chore: update selected project work')).trim();
+  const secretFindings = await scanFilesForSecrets(status.repoRoot, selectedFiles);
+  const risks = [];
+  if (status.branch === 'main') risks.push('Current branch is main; default flow should use a feature or release branch before commit.');
+  if (unaccountedFiles.length) risks.push(`Unaccounted dirty files: ${unaccountedFiles.join(', ')}`);
+  if (!selectedFiles.length) risks.push('No files selected for the proposed action.');
+  if (secretFindings.length) risks.push(...secretFindings);
+  if (!recommendations.itemCount) risks.push('No backlog items are currently Ready to Deploy or Passed Testing.');
+  return {
+    repoRoot: status.repoRoot,
+    branch: status.branch,
+    upstream: status.upstream,
+    changedFiles: status.changedFiles,
+    selectedFiles,
+    excludedFiles,
+    unaccountedFiles,
+    tests: status.tests,
+    backlogItems: recommendations.items,
+    releaseId,
+    branchName,
+    commitMessage,
+    commands: {
+      prepareBranch: branchName ? `git switch -c ${branchName}` : '',
+      stageSelected: selectedFiles.length ? `git add -- ${selectedFiles.join(' ')}` : '',
+      commit: `git commit -m "${commitMessage.replaceAll('"', '\\"')}"`,
+      push: branchName || status.branch ? `git push -u origin ${branchName || status.branch}` : '',
+      openPr: branchName || status.branch ? `gh pr create --base main --head ${branchName || status.branch}` : '',
+      mergePr: 'gh pr merge <number> --merge',
+    },
+    requiredConfirmations: {
+      prepareBranch: branchName ? `PREPARE BRANCH ${branchName}` : '',
+      stageSelected: 'STAGE SELECTED',
+      commit: `COMMIT ${releaseId || branchName || 'SELECTED'}`,
+      push: `PUSH ${branchName || status.branch}`,
+      openPr: `OPEN PR ${branchName || status.branch}`,
+      mergePr: input.prNumber ? `MERGE PR ${input.prNumber}` : 'MERGE PR <number>',
+    },
+    risks,
+    blockers: risks,
+  };
+}
+
+function confirmationForAction(action, input, currentBranch) {
+  const branchName = String(input.branchName || currentBranch || '').trim();
+  const releaseId = String(input.releaseId || '').trim();
+  const prNumber = String(input.prNumber || '').trim();
+  const map = {
+    'prepare-branch': `PREPARE BRANCH ${branchName}`,
+    'stage-selected': 'STAGE SELECTED',
+    commit: `COMMIT ${releaseId || branchName || 'SELECTED'}`,
+    push: `PUSH ${branchName}`,
+    'open-pr': `OPEN PR ${branchName}`,
+    'merge-pr': `MERGE PR ${prNumber}`,
+  };
+  return map[action] || '';
+}
+
+export async function runControlManagerAction(projectPath = DEFAULT_PROJECT_PATH, action, input = {}) {
+  const status = await getControlManagerStatus(projectPath);
+  if (status.error) return status;
+  const expected = confirmationForAction(action, input, status.branch);
+  if (!expected || input.confirmation !== expected) {
+    return { error: `Typed confirmation must exactly match: ${expected || 'unsupported action'}`, statusCode: 403, expectedConfirmation: expected };
+  }
+  const packagePreview = await buildControlApprovalPackage(projectPath, input);
+  if (['stage-selected', 'commit'].includes(action) && packagePreview.unaccountedFiles?.length) {
+    return { error: `Unaccounted dirty files must be selected or excluded before ${action}: ${packagePreview.unaccountedFiles.join(', ')}`, statusCode: 409, approvalPackage: packagePreview };
+  }
+  if (action === 'commit' && packagePreview.risks.some((risk) => /token-like|private key|credential-like|environment file/i.test(risk))) {
+    return { error: 'Secret scan found risky content in selected files.', statusCode: 409, approvalPackage: packagePreview };
+  }
+  const selectedFiles = packagePreview.selectedFiles || [];
+  let result;
+  if (action === 'prepare-branch') result = await gitExec(status.repoRoot, ['switch', '-c', String(input.branchName || '').trim()]);
+  else if (action === 'stage-selected') {
+    if (!selectedFiles.length) return { error: 'Select at least one file to stage.', statusCode: 400 };
+    result = await gitExec(status.repoRoot, ['add', '--', ...selectedFiles]);
+  } else if (action === 'commit') result = await gitExec(status.repoRoot, ['commit', '-m', packagePreview.commitMessage]);
+  else if (action === 'push') result = await gitExec(status.repoRoot, ['push', '-u', 'origin', String(input.branchName || status.branch).trim()]);
+  else if (action === 'open-pr') result = await ghExec(status.repoRoot, ['pr', 'create', '--base', 'main', '--head', String(input.branchName || status.branch).trim(), '--title', String(input.prTitle || packagePreview.commitMessage), '--body', String(input.prBody || 'Prepared by PM Tools Control Manager.')]);
+  else if (action === 'merge-pr') result = await ghExec(status.repoRoot, ['pr', 'merge', String(input.prNumber || '').trim(), '--merge']);
+  else return { error: `Unsupported control-manager action: ${action}`, statusCode: 404 };
+  if (!result.ok) return { error: result.stderr || `${action} failed.`, statusCode: 500, result, approvalPackage: packagePreview };
+  return { action, result, approvalPackage: packagePreview };
+}
+
 export async function readBacklogItems(projectPath = DEFAULT_PROJECT_PATH) {
   const backlogRoot = path.resolve(projectPath, 'backlog');
   const items = [];
@@ -1506,7 +2104,10 @@ async function serveStatic(req, res) {
   try {
     const content = await fs.readFile(filePath);
     const ext = path.extname(filePath);
-    res.writeHead(200, { 'content-type': MIME_TYPES[ext] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'content-type': MIME_TYPES[ext] || 'application/octet-stream',
+      'cache-control': 'no-store',
+    });
     res.end(content);
   } catch (error) {
     if (error.code === 'ENOENT' || error.code === 'EISDIR') {
@@ -1516,9 +2117,251 @@ async function serveStatic(req, res) {
   }
 }
 
-export function createServer({ projectPath = DEFAULT_PROJECT_PATH } = {}) {
+export function updateRecentProjects(recentProjects, previousPath, previousLabel) {
+  if (!previousPath) return Array.isArray(recentProjects) ? [...recentProjects] : [];
+  let updated = Array.isArray(recentProjects) ? [...recentProjects] : [];
+  const resolvedPrev = path.resolve(previousPath);
+  updated = updated.filter((r) => path.resolve(r.path) !== resolvedPrev);
+  updated.unshift({ path: previousPath, label: previousLabel || '', lastUsed: todayIsoDate() });
+  return updated.slice(0, 10);
+}
+
+async function ensureConfigFile(config, configPath) {
+  try {
+    await fs.access(configPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    await writeAppConfig({ activeProjectId: config.activeProjectId, projects: config.projects }, configPath);
+  }
+}
+
+export async function browseForProjectPath() {
+  if (process.platform !== 'win32') {
+    return { error: 'Folder browsing is only supported on Windows in this local app.', statusCode: 501 };
+  }
+  const script = String.raw`
+$source = @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class FolderPicker {
+  [ComImport]
+  [Guid("DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7")]
+  private class FileOpenDialog {}
+
+  [ComImport]
+  [Guid("42f85136-db7e-439c-85f1-e4075d135fc8")]
+  [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  private interface IFileDialog {
+    [PreserveSig] int Show(IntPtr parent);
+    void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+    void SetFileTypeIndex(uint iFileType);
+    void GetFileTypeIndex(out uint piFileType);
+    void Advise(IntPtr pfde, out uint pdwCookie);
+    void Unadvise(uint dwCookie);
+    void SetOptions(uint fos);
+    void GetOptions(out uint fos);
+    void SetDefaultFolder(IntPtr psi);
+    void SetFolder(IntPtr psi);
+    void GetFolder(out IntPtr ppsi);
+    void GetCurrentSelection(out IntPtr ppsi);
+    void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+    void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+    void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+    void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+    void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+    void GetResult(out IShellItem ppsi);
+    void AddPlace(IntPtr psi, uint fdap);
+    void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
+    void Close(int hr);
+    void SetClientGuid(ref Guid guid);
+    void ClearClientData();
+    void SetFilter(IntPtr pFilter);
+  }
+
+  [ComImport]
+  [Guid("d57c7288-d4ad-4768-be02-9d969532d960")]
+  [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  private interface IFileOpenDialog {
+    [PreserveSig] int Show(IntPtr parent);
+    void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+    void SetFileTypeIndex(uint iFileType);
+    void GetFileTypeIndex(out uint piFileType);
+    void Advise(IntPtr pfde, out uint pdwCookie);
+    void Unadvise(uint dwCookie);
+    void SetOptions(uint fos);
+    void GetOptions(out uint fos);
+    void SetDefaultFolder(IntPtr psi);
+    void SetFolder(IntPtr psi);
+    void GetFolder(out IntPtr ppsi);
+    void GetCurrentSelection(out IntPtr ppsi);
+    void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+    void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+    void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+    void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+    void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+    void GetResult(out IShellItem ppsi);
+  }
+
+  [ComImport]
+  [Guid("43826d1e-e718-42ee-bc55-a1e261c37bfe")]
+  [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  private interface IShellItem {
+    void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+    void GetParent(out IShellItem ppsi);
+    void GetDisplayName(uint sigdnName, out IntPtr ppszName);
+    void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+    void Compare(IShellItem psi, uint hint, out int piOrder);
+  }
+
+  public static string Pick() {
+    const uint FOS_PICKFOLDERS = 0x00000020;
+    const uint FOS_FORCEFILESYSTEM = 0x00000040;
+    const uint FOS_PATHMUSTEXIST = 0x00000800;
+    const uint SIGDN_FILESYSPATH = 0x80058000;
+    const int ERROR_CANCELLED = unchecked((int)0x800704C7);
+
+    IFileOpenDialog dialog = (IFileOpenDialog)new FileOpenDialog();
+    dialog.SetOptions(FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+    dialog.SetTitle("Select a project repository or docs/project folder");
+    dialog.SetOkButtonLabel("Select Folder");
+    int hr = dialog.Show(IntPtr.Zero);
+    if (hr == ERROR_CANCELLED) return "";
+    if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+    IShellItem item;
+    dialog.GetResult(out item);
+    IntPtr pathPtr;
+    item.GetDisplayName(SIGDN_FILESYSPATH, out pathPtr);
+    string path = Marshal.PtrToStringUni(pathPtr);
+    Marshal.FreeCoTaskMem(pathPtr);
+    return path;
+  }
+}
+"@
+Add-Type -TypeDefinition $source
+[FolderPicker]::Pick()
+`;
+  try {
+    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-STA', '-Command', script], { windowsHide: false });
+    const selectedPath = stdout.trim();
+    return selectedPath ? { selectedPath } : { selectedPath: '', cancelled: true };
+  } catch (error) {
+    return { error: error.message || 'Folder browser failed.', statusCode: 500 };
+  }
+}
+
+export function createServer(options = {}) {
+  let config = normalizeAppConfig(options.config || runtimeConfig);
+  const configPath = options.configPath || APP_CONFIG_PATH;
+  const refreshConfigFromDisk = !Object.hasOwn(options, 'config') || Object.hasOwn(options, 'configPath');
+
+  async function refreshConfig() {
+    if (!refreshConfigFromDisk) return;
+    Object.assign(config, await readAppConfig(configPath));
+  }
+
   return http.createServer(async (req, res) => {
+    await refreshConfig();
+    const projectPath = config.activeProject?.path || config.projectPath || DEFAULT_PROJECT_PATH;
     const url = new URL(req.url, 'http://localhost');
+
+    if (req.method === 'GET' && url.pathname === '/api/config') {
+      try {
+        return sendJson(res, config);
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/projects/analyze') {
+      try {
+        const body = await readJsonBody(req);
+        return sendJson(res, await analyzeProjectPath(body.path));
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/projects/browse') {
+      try {
+        const result = await browseForProjectPath();
+        if (result.error) return sendJson(res, result, result.statusCode || 500);
+        return sendJson(res, result);
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/projects') {
+      try {
+        await ensureConfigFile(config, configPath);
+        const result = await addProjectToConfig(await readJsonBody(req), configPath);
+        if (result.error) return sendJson(res, result, result.statusCode || 400);
+        Object.assign(config, result.config);
+        return sendJson(res, { ...result.config, project: result.project, analysis: result.analysis }, 201);
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+    if (projectMatch && req.method === 'PUT') {
+      try {
+        await ensureConfigFile(config, configPath);
+        const result = await updateProjectInConfig(decodeURIComponent(projectMatch[1]), await readJsonBody(req), configPath);
+        if (result.error) return sendJson(res, result, result.statusCode || 400);
+        Object.assign(config, result.config);
+        return sendJson(res, { ...result.config, project: result.project, analysis: result.analysis });
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    if (projectMatch && req.method === 'DELETE') {
+      try {
+        await ensureConfigFile(config, configPath);
+        const result = await removeProjectFromConfig(decodeURIComponent(projectMatch[1]), configPath);
+        if (result.error) return sendJson(res, result, result.statusCode || 400);
+        Object.assign(config, result.config);
+        return sendJson(res, { ...result.config, removedProject: result.removedProject });
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/config/active-project') {
+      try {
+        await ensureConfigFile(config, configPath);
+        const body = await readJsonBody(req);
+        const result = await setActiveProjectInConfig(String(body.activeProjectId || body.projectId || ''), configPath);
+        if (result.error) return sendJson(res, result, result.statusCode || 400);
+        Object.assign(config, result.config);
+        return sendJson(res, { ...result.config, analysis: result.analysis });
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/config') {
+      try {
+        await ensureConfigFile(config, configPath);
+        const body = await readJsonBody(req);
+        const newPath = String(body.projectPath ?? '').trim();
+        const newLabel = String(body.projectLabel ?? '').trim();
+        if (!newPath) return sendError(res, 400, 'projectPath is required.');
+        const existing = config.projects.find((project) => path.resolve(project.path).toLowerCase() === path.resolve(newPath).toLowerCase());
+        const result = existing
+          ? await setActiveProjectInConfig(existing.id, configPath)
+          : await addProjectToConfig({ path: newPath, label: newLabel, color: body.color }, configPath);
+        if (result.error) return sendJson(res, result, result.statusCode || 400);
+        Object.assign(config, result.config);
+        return sendJson(res, { ...result.config, analysis: result.analysis });
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/backlog') {
       try {
         return sendJson(res, await readBacklogItems(projectPath));
@@ -1575,6 +2418,45 @@ export function createServer({ projectPath = DEFAULT_PROJECT_PATH } = {}) {
       }
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/control-manager/status') {
+      try {
+        const result = await getControlManagerStatus(projectPath);
+        if (result.error) return sendJson(res, result, result.statusCode || 400);
+        return sendJson(res, result);
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/control-manager/recommendations') {
+      try {
+        return sendJson(res, await getPromotionRecommendations(projectPath));
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/control-manager/approval-package') {
+      try {
+        const result = await buildControlApprovalPackage(projectPath, await readJsonBody(req));
+        if (result.error) return sendJson(res, result, result.statusCode || 400);
+        return sendJson(res, result);
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    const controlActionMatch = url.pathname.match(/^\/api\/control-manager\/actions\/([^/]+)$/);
+    if (req.method === 'POST' && controlActionMatch) {
+      try {
+        const result = await runControlManagerAction(projectPath, decodeURIComponent(controlActionMatch[1]), await readJsonBody(req));
+        if (result.error) return sendJson(res, result, result.statusCode || 400);
+        return sendJson(res, result);
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/releases/assign') {
       try {
         const result = await assignItemsToRelease(await readJsonBody(req), projectPath);
@@ -1585,7 +2467,7 @@ export function createServer({ projectPath = DEFAULT_PROJECT_PATH } = {}) {
       }
     }
 
-    if (req.method === 'POST' && url.pathname === '/api/releases') {
+    if ((req.method === 'POST' || req.method === 'PUT') && url.pathname === '/api/releases') {
       try {
         const body = await readJsonBody(req);
         const result = await createRelease(body.version, projectPath);

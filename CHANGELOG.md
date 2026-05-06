@@ -9,4 +9,4 @@ Initial review export.
 - Added reusable agent prompts.
 - Added standalone PM Tools app.
 - Added fake example project.
-- Added copy-ready `package/docs/pm` folder for embedding in another repository.
+- Added copy-ready methodology package for embedding in another repository.

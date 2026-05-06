@@ -28,63 +28,48 @@
             <h1 id="viewTitle">Backlog Dashboard</h1>
           </div>
           <div class="header-actions">
+            <div class="project-picker">
+              <span>Project</span>
+              <button id="activeProjectButton" class="project-picker-button" type="button">
+                <span id="activeProjectSwatch" class="project-picker-swatch"></span>
+                <strong id="activeProjectLabel">No projects</strong>
+              </button>
+              <div id="activeProjectMenu" class="project-picker-menu" hidden></div>
+              <select id="activeProjectSelect" hidden></select>
+            </div>
             <button id="addItemBtn" type="button">Add Backlog Item</button>
             <button id="refreshBtn" type="button" class="secondary">Refresh</button>
           </div>
         </header>
 
         <section class="view-section active" data-view="backlog">
-          <section class="summary-grid dashboard-cards" aria-label="Project health">
-            <div><span class="summary-label">Total Items</span><strong id="itemCount">0</strong></div>
-            <div><span class="summary-label">Active</span><strong id="activeCount">0</strong></div>
-            <div><span class="summary-label">Completed</span><strong id="completedCount">0</strong></div>
-            <div><span class="summary-label">Blocked</span><strong id="blockedCount">0</strong></div>
-            <div><span class="summary-label">Clarifying</span><strong id="clarifyingCount">0</strong></div>
-            <div><span class="summary-label">Ready / Deploy Ready</span><strong id="deployReadyCount">0</strong></div>
-            <div><span class="summary-label">New</span><strong id="newCount">0</strong></div>
-            <div><span class="summary-label">In Development</span><strong id="developmentCount">0</strong></div>
-            <div><span class="summary-label">Ready for Testing</span><strong id="readyTestingCount">0</strong></div>
-            <div><span class="summary-label">Passed Testing</span><strong id="passedTestingCount">0</strong></div>
+          <section class="dashboard-context-strip" aria-label="Project context">
+            <div class="ctx-stat ctx-total"><span class="ctx-label">Total</span><strong id="itemCount">0</strong></div>
+            <div class="ctx-stat ctx-active"><span class="ctx-label">Active</span><strong id="activeCount">0</strong></div>
+            <div class="ctx-stat ctx-build"><span class="ctx-label">In Development</span><strong id="developmentCount">0</strong></div>
+            <div class="ctx-stat ctx-new"><span class="ctx-label">New</span><strong id="newCount">0</strong></div>
+            <div class="ctx-stat ctx-testing"><span class="ctx-label">Passed Testing</span><strong id="passedTestingCount">0</strong></div>
+            <div class="ctx-stat ctx-completed"><span class="ctx-label">Completed</span><strong id="completedCount">0</strong></div>
           </section>
 
           <section class="dashboard-grid">
-            <article class="dashboard-panel">
+            <article class="dashboard-panel panel-danger">
               <h2>Needs Attention</h2>
               <div id="needsAttention" class="attention-list"></div>
             </article>
-            <article class="dashboard-panel">
+            <article class="dashboard-panel panel-testing">
               <h2>Ready for Human Testing</h2>
               <div id="readyForTesting" class="attention-list"></div>
             </article>
-            <article class="dashboard-panel">
+            <article class="dashboard-panel panel-success">
               <h2>Ready to Deploy</h2>
               <div id="readyToDeploy" class="attention-list"></div>
             </article>
-            <article class="dashboard-panel">
+            <article class="dashboard-panel panel-info">
               <h2>Recent Activity</h2>
               <div id="recentActivity" class="attention-list"></div>
             </article>
           </section>
-
-          <section class="dashboard-grid" aria-label="Backlog summaries">
-            <article class="dashboard-panel">
-              <h2>Release Readiness</h2>
-              <div id="releaseSummary" class="summary-pills"></div>
-            </article>
-            <article class="dashboard-panel">
-              <h2>By Status</h2>
-              <div id="statusSummary" class="grouped-pills"></div>
-            </article>
-            <article class="dashboard-panel">
-              <h2>By Priority</h2>
-              <div id="prioritySummary" class="summary-pills"></div>
-            </article>
-            <article class="dashboard-panel">
-              <h2>By Type</h2>
-              <div id="typeSummary" class="summary-pills"></div>
-            </article>
-          </section>
-
 
           <section class="board-section">
             <div class="section-header">
@@ -96,14 +81,25 @@
 
           <section class="filters" aria-label="Backlog filters">
             <label>Search<input id="searchFilter" type="search" placeholder="ID, title, status, release..."></label>
+            <label>Type<select id="typeFilter"><option value="">All types</option></select></label>
             <label>Status<select id="statusFilter"><option value="">All statuses</option></select></label>
             <label>Priority<select id="priorityFilter"><option value="">All priorities</option></select></label>
+            <label>Effort<select id="effortFilter"><option value="">All efforts</option></select></label>
+            <label>Release<select id="releaseFilter"><option value="">All releases</option></select></label>
             <label>Folder<select id="folderFilter"><option value="">All folders</option></select></label>
             <label>Sort<select id="sortSelect"><option value="updated">Updated</option><option value="priority">Priority</option><option value="status">Status</option><option value="release">Release</option></select></label>
           </section>
 
           <section class="action-bar">
             <span id="selectionCount">0 selected</span>
+            <div class="bulk-actions" aria-label="Bulk edit selected backlog items">
+              <label>Release<input id="bulkReleaseInput" type="text" placeholder="v0.1.0 or Unassigned"></label>
+              <button id="bulkReleaseBtn" type="button" class="secondary">Assign Release</button>
+              <label>Priority<select id="bulkPrioritySelect"><option value="">Priority...</option></select></label>
+              <button id="bulkPriorityBtn" type="button" class="secondary">Change Priority</button>
+              <label>Status<select id="bulkStatusSelect"><option value="">Status...</option></select></label>
+              <button id="bulkStatusBtn" type="button" class="secondary">Change Status</button>
+            </div>
             <button id="goReleasesBtn" type="button" class="secondary">Assign in Releases</button>
           </section>
 
@@ -168,7 +164,7 @@
           <section class="prompt-workspace" aria-label="Prompt workspace">
             <div class="prompt-header">
               <div><h2>Prompt Workspace</h2><p>Generate implementation, release, human QA, and version-control prompts without performing version-control actions.</p></div>
-              <button id="copyPromptBtn" type="button" class="secondary">Copy Output</button>
+              <button id="copyPromptBtn" type="button" class="secondary">Copy Prompt</button>
             </div>
             <div class="prompt-controls">
               <label>Prompt Type
@@ -196,8 +192,17 @@
 
         <section class="view-section" data-view="settings">
           <section class="settings-grid">
-            <article class="dashboard-panel"><h2>Project Paths</h2><div id="settingsPaths" class="settings-list"></div></article>
-            <article class="dashboard-panel"><h2>Version Control</h2><p>No commit, push, PR, merge, deploy, tag, or release actions are performed by this app.</p></article>
+            <article class="dashboard-panel"><h2>Projects</h2><div id="settingsPaths" class="settings-list"></div></article>
+            <article class="dashboard-panel control-manager-panel">
+              <div class="control-manager-header">
+                <div>
+                  <h2>Control Manager</h2>
+                  <p>Prepare approval-gated version-control actions from the active project methodology.</p>
+                </div>
+                <button id="refreshControlManagerBtn" type="button" class="secondary small-button">Refresh</button>
+              </div>
+              <div id="controlManager" class="control-manager">Loading control manager...</div>
+            </article>
           </section>
         </section>
       </section>
