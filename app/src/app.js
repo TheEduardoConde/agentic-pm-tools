@@ -1936,6 +1936,7 @@ async function reloadProjectData() {
   await loadBacklog();
   await loadReleases();
   await loadControlManager();
+  setView(state.currentView);
 }
 
 function applyFilter(field, value) {
@@ -1954,8 +1955,9 @@ function setView(view) {
   document.querySelectorAll('[data-view-target]').forEach((button) => {
     button.classList.toggle('active', button.dataset.viewTarget === view);
   });
+  const label = state.config.projectLabel;
   const titles = {
-    backlog: 'Backlog Dashboard',
+    backlog: label ? `Backlog Dashboard for: ${label}` : 'Backlog Dashboard',
     releases: 'Release Workspace',
     validation: 'Validation',
     prompts: 'Prompt Workspace',
