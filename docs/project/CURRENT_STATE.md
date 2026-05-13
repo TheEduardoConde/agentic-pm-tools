@@ -34,17 +34,12 @@ Completed today:
 
 - Simplified the backlog lifecycle to the solo developer / AI-assisted workflow: `Backlog`, `Ready`, `In Progress`, `Needs Validation`, `Ready to Release`, `Done`, `Blocked`, `Deferred`, and `Archived`.
 - Updated PM Tools app behavior, validation, tests, UI labels, and methodology docs to use the simplified lifecycle.
-- Synced the reusable `docs/_methodology` package into active projects: PM Tools, GeoData, DistrictView, and trading-agent.
-- Repaired GeoData PM data after the lifecycle migration by converting `New` to `Backlog` and `Ready for Testing` to `Needs Validation`.
-- Verified PM Tools, GeoData, DistrictView, and trading-agent project data through the PM Tools parser. GeoData, PM Tools, and trading-agent validate cleanly; DistrictView remains valid with two release membership warnings.
-- Restarted the local PM Tools app server after stale UI behavior was observed.
+- Committed the lifecycle migration, backlog expansion, and harness setup (CLAUDE.md, .claude/commands, .gitignore).
 
 Recommended next work:
 
-1. Review and commit the PM Tools lifecycle/methodology changes.
-2. Decide whether to commit the copied `docs/_methodology` folders in GeoData, DistrictView, and trading-agent.
-3. Resolve DistrictView's two release membership warnings for `BUG-0025` and `UI-0028`.
-4. Leave GeoData's unrelated generated/data-builder dirty files out of any PM Tools commit.
+1. Human QA pass on the 21 items in `Needs Validation` status.
+2. Promote validated items to `Ready to Release` and plan v0.2.0 / v0.3.0 / v0.3.1 releases.
 
 ## Useful Commands
 
