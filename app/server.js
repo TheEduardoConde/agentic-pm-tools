@@ -91,40 +91,22 @@ const PREFIX_TYPE_MAP = Object.fromEntries(Object.entries(TYPE_PREFIX_MAP).map((
 const PRIORITIES = ['Critical', 'High', 'Medium', 'Low', 'Someday', 'Parking Lot'];
 const EFFORTS = ['XS', 'S', 'M', 'L', 'XL', 'Unknown'];
 const STATUSES = [
-  'New',
-  'Clarifying',
+  'Backlog',
   'Ready',
-  'Planned',
-  'In Development',
-  'Development Complete',
-  'Needs Review',
-  'Changes Requested',
-  'Ready for Testing',
-  'In Testing',
-  'Failed Testing',
-  'Passed Testing',
-  'Ready to Deploy',
-  'Deployed',
+  'In Progress',
+  'Needs Validation',
+  'Ready to Release',
+  'Done',
   'Blocked',
   'Deferred',
-  'Rejected',
-  'Duplicate',
   'Archived',
 ];
 const ACTIVE_STATUSES = new Set([
-  'New',
-  'Clarifying',
+  'Backlog',
   'Ready',
-  'Planned',
-  'In Development',
-  'Development Complete',
-  'Needs Review',
-  'Changes Requested',
-  'Ready for Testing',
-  'In Testing',
-  'Failed Testing',
-  'Passed Testing',
-  'Ready to Deploy',
+  'In Progress',
+  'Needs Validation',
+  'Ready to Release',
   'Blocked',
 ]);
 const STATUS_PROGRESS = new Map(STATUSES.map((status, index) => [status, index]));
@@ -150,6 +132,7 @@ const KNOWN_SECTION_TITLES = [
   'Codex Prompt',
   'Changed Files',
   'Owner Review Needed',
+  'Activity',
   'Archive Note',
   'Defer Note',
   'Links',
@@ -158,6 +141,13 @@ const KNOWN_SECTION_TITLES = [
 function parseScalar(value) {
   const trimmed = String(value ?? '').trim();
   if (!trimmed) return '';
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    return trimmed
+      .slice(1, -1)
+      .split(',')
+      .map((entry) => parseScalar(entry))
+      .filter(Boolean);
+  }
   if (
     (trimmed.startsWith('"') && trimmed.endsWith('"'))
     || (trimmed.startsWith("'") && trimmed.endsWith("'"))
@@ -295,11 +285,28 @@ export async function getNextSequenceNumber(projectPath = DEFAULT_PROJECT_PATH) 
 }
 
 function yamlLine(key, value = '') {
+  if (Array.isArray(value)) {
+    return `${key}: [${value.map((entry) => String(entry ?? '').replace(/[\r\n,[\]]/g, ' ').trim()).filter(Boolean).join(', ')}]`;
+  }
   return `${key}: ${String(value ?? '').replace(/[\r\n]/g, ' ').trim()}`;
 }
 
 function normalizeListText(value) {
   return String(value ?? '').trim();
+}
+
+function normalizeTokenList(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map((entry) => String(entry ?? '').trim()).filter(Boolean))];
+  }
+  return [...new Set(String(value ?? '')
+    .split(/[\n,]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean))];
+}
+
+function normalizeItemIdList(value) {
+  return normalizeTokenList(value).map((entry) => entry.toUpperCase());
 }
 
 function criteriaLines(value) {
@@ -324,9 +331,9 @@ function sectionBlock(title, content) {
 
 function statusFolder(status) {
   if (ACTIVE_STATUSES.has(status)) return 'active';
-  if (status === 'Deployed') return 'completed';
+  if (status === 'Done') return 'completed';
   if (status === 'Deferred') return 'deferred';
-  if (['Archived', 'Rejected', 'Duplicate'].includes(status)) return 'archived';
+  if (status === 'Archived') return 'archived';
   throw new Error(`Unsupported status: ${status}`);
 }
 
@@ -375,6 +382,10 @@ export function validateCreateBacklogInput(input = {}) {
       humanTestingPlan: normalizeListText(input.humanTestingPlan),
       ownerReviewNeeded: normalizeListText(input.ownerReviewNeeded),
       userStory: normalizeListText(input.userStory),
+      tags: normalizeTokenList(input.tags),
+      blocks: normalizeItemIdList(input.blocks),
+      blocked_by: normalizeItemIdList(input.blocked_by ?? input.blockedBy),
+      sprint: normalizeListText(input.sprint),
       links: normalizeListText(input.links),
     },
   };
@@ -388,10 +399,14 @@ export function buildBacklogItemMarkdown(input, { id, number, date }) {
     yamlLine('prefix', input.prefix),
     yamlLine('number', number),
     yamlLine('title', input.title),
-    yamlLine('status', 'New'),
+    yamlLine('status', 'Backlog'),
     yamlLine('priority', input.priority),
     yamlLine('effort', input.effort),
     yamlLine('release', 'Unassigned'),
+    yamlLine('tags', input.tags || []),
+    yamlLine('blocks', input.blocks || []),
+    yamlLine('blocked_by', input.blocked_by || []),
+    yamlLine('sprint', input.sprint || ''),
     yamlLine('created', date),
     yamlLine('developed'),
     yamlLine('updated', date),
@@ -419,6 +434,7 @@ export function buildBacklogItemMarkdown(input, { id, number, date }) {
     + optionalSection('Owner Review Needed', input.ownerReviewNeeded)
     + '\n## Codex Prompt\n\nNot generated yet.\n'
     + '\n## Changed Files\n\n- None yet.\n'
+    + '\n## Activity\n\n- None yet.\n'
     + `\n## Links\n\n${input.links || '- None.'}\n`;
 }
 
@@ -630,8 +646,10 @@ async function readJsonBody(req) {
   return JSON.parse(raw);
 }
 
-function validationFinding(severity, message, { id = '', path: filePath = '', suggestedFix = '' } = {}) {
-  return { severity, id, path: filePath, message, suggestedFix };
+function validationFinding(severity, message, { id = '', path: filePath = '', suggestedFix = '', fix = null } = {}) {
+  const finding = { severity, id, path: filePath, message, suggestedFix };
+  if (fix) finding.fix = fix;
+  return finding;
 }
 
 async function readReleaseFiles(projectPath) {
@@ -766,6 +784,7 @@ export async function validateBacklog(projectPath = DEFAULT_PROJECT_PATH, { upda
           id: item.id,
           path: item.path,
           suggestedFix: `Move this file to ./docs/project/backlog/${expectedFolder}/.`,
+          fix: { action: 'move-item', id: item.id },
         }));
       }
     }
@@ -814,6 +833,24 @@ export async function validateBacklog(projectPath = DEFAULT_PROJECT_PATH, { upda
         suggestedFix: `Rename the file so it starts with ${item.id}.`,
       }));
     }
+    for (const tag of item.tags || []) {
+      if (!/^[A-Za-z0-9_-]+$/.test(tag)) {
+        findings.push(validationFinding('Warning', `Invalid tag value: ${tag}.`, {
+          id: item.id,
+          path: item.path,
+          suggestedFix: 'Use tags with only letters, numbers, hyphens, and underscores.',
+        }));
+      }
+    }
+    for (const dependencyId of [...(item.blocks || []), ...(item.blocked_by || [])]) {
+      if (dependencyId && !itemById.has(dependencyId)) {
+        findings.push(validationFinding('Error', `Backlog item ${item.id} references missing dependency ${dependencyId}.`, {
+          id: item.id,
+          path: item.path,
+          suggestedFix: 'Remove the missing dependency ID or create the referenced backlog item.',
+        }));
+      }
+    }
   }
 
   for (const release of releases) {
@@ -855,6 +892,7 @@ export async function validateBacklog(projectPath = DEFAULT_PROJECT_PATH, { upda
       findings.push(validationFinding('Warning', 'BACKLOG.md index appears out of sync with item files.', {
         path: 'BACKLOG.md',
         suggestedFix: 'Regenerate BACKLOG.md from individual backlog item files.',
+        fix: { action: 'regenerate-index' },
       }));
     }
   } catch (error) {
@@ -1140,6 +1178,12 @@ function validateEditBacklogInput(input = {}, original = {}) {
     release,
     type: requestedType || original.type || typeFromPrefix(original.prefix),
   };
+  if (Object.hasOwn(input, 'tags')) value.tags = normalizeTokenList(input.tags);
+  if (Object.hasOwn(input, 'blocks')) value.blocks = normalizeItemIdList(input.blocks);
+  if (Object.hasOwn(input, 'blocked_by')) value.blocked_by = normalizeItemIdList(input.blocked_by);
+  if (Object.hasOwn(input, 'blockedBy')) value.blocked_by = normalizeItemIdList(input.blockedBy);
+  if (Object.hasOwn(input, 'sprint')) value.sprint = normalizeListText(input.sprint);
+  if (Object.hasOwn(input, 'activityEntry')) value.activityEntry = normalizeListText(input.activityEntry);
   const optionalFields = [
     ['summary', 'summary'],
     ['userStory', 'userStory'],
@@ -1175,6 +1219,17 @@ function editedSectionContent(input, original, title, inputKey) {
   return original.sections?.[title]?.content ?? '';
 }
 
+function activityEntry(message, date = currentIsoTimestamp()) {
+  return `- ${date} - ${String(message ?? '').replace(/[\r\n]+/g, ' ').trim()}`;
+}
+
+function appendActivityContent(original, entry) {
+  const existing = original.sections?.Activity?.content || '';
+  if (!entry) return existing;
+  if (!existing.trim() || /^-\s+None yet\.$/i.test(existing.trim())) return entry;
+  return `${existing.trimEnd()}\n${entry}`;
+}
+
 function buildEditedBacklogMarkdown(original, input, date) {
   const fm = { ...original.frontMatter };
   fm.title = input.title;
@@ -1182,11 +1237,15 @@ function buildEditedBacklogMarkdown(original, input, date) {
   fm.priority = input.priority;
   fm.effort = input.effort;
   fm.release = input.release;
+  fm.tags = input.tags ?? normalizeTokenList(fm.tags);
+  fm.blocks = input.blocks ?? normalizeItemIdList(fm.blocks);
+  fm.blocked_by = input.blocked_by ?? normalizeItemIdList(fm.blocked_by);
+  fm.sprint = input.sprint ?? fm.sprint ?? '';
   fm.updated = date;
 
-  if (input.status === 'Development Complete' && !fm.developed) fm.developed = date;
-  if (input.status === 'Passed Testing' && !fm.tested) fm.tested = date;
-  if (input.status === 'Deployed' && !fm.deployed) fm.deployed = date;
+  if (['Needs Validation', 'Ready to Release', 'Done'].includes(input.status) && !fm.developed) fm.developed = date;
+  if (['Ready to Release', 'Done'].includes(input.status) && !fm.tested) fm.tested = date;
+  if (input.status === 'Done' && !fm.deployed) fm.deployed = date;
   if (input.status === 'Archived') {
     if (!fm.archived) fm.archived = date;
     if (input.archive_reason) fm.archive_reason = input.archive_reason;
@@ -1207,6 +1266,10 @@ function buildEditedBacklogMarkdown(original, input, date) {
     yamlLine('priority', fm.priority),
     yamlLine('effort', fm.effort),
     yamlLine('release', fm.release),
+    yamlLine('tags', fm.tags),
+    yamlLine('blocks', fm.blocks),
+    yamlLine('blocked_by', fm.blocked_by),
+    yamlLine('sprint', fm.sprint),
     yamlLine('created', fm.created),
     yamlLine('developed', fm.developed),
     yamlLine('updated', fm.updated),
@@ -1220,6 +1283,10 @@ function buildEditedBacklogMarkdown(original, input, date) {
   ].join('\n');
 
   const preserved = (title) => original.sections?.[title]?.content ?? '';
+  const activity = appendActivityContent(
+    original,
+    input.activityEntry || (original.status !== input.status ? activityEntry(`Status changed from ${original.status || 'blank'} to ${input.status}.`) : '')
+  );
   const blocks = [
     sectionBlock('User Story', editedSectionContent(input, original, 'User Story', 'userStory')),
     sectionBlock('Summary', editedSectionContent(input, original, 'Summary', 'summary')),
@@ -1235,6 +1302,7 @@ function buildEditedBacklogMarkdown(original, input, date) {
     sectionBlock('Owner Review Needed', editedSectionContent(input, original, 'Owner Review Needed', 'ownerReviewNeeded')),
     sectionBlock('Codex Prompt', preserved('Codex Prompt')),
     sectionBlock('Changed Files', preserved('Changed Files')),
+    sectionBlock('Activity', activity || '- None yet.'),
     sectionBlock('Links', editedSectionContent(input, original, 'Links', 'links')),
   ];
 
@@ -1288,6 +1356,16 @@ export async function updateBacklogItem(id, input, projectPath = DEFAULT_PROJECT
 
   const validation = validateEditBacklogInput(input, original);
   if (!validation.ok) return { error: validation.errors.join('; '), statusCode: 400 };
+  const warnings = [];
+  if (validation.value.status === 'In Progress') {
+    const byId = new Map(backlog.items.map((item) => [item.id, item]));
+    const openBlockers = (validation.value.blocked_by ?? original.blocked_by ?? [])
+      .map((blockedId) => byId.get(blockedId))
+      .filter((blockedItem) => blockedItem && blockedItem.status !== 'Done');
+    if (openBlockers.length) {
+      warnings.push(`Item is blocked by non-deployed item(s): ${openBlockers.map((item) => `${item.id} (${item.status})`).join(', ')}.`);
+    }
+  }
 
   const targetFolder = statusFolder(validation.value.status);
   const targetFolderPath = path.resolve(backlogRoot, targetFolder);
@@ -1328,8 +1406,101 @@ export async function updateBacklogItem(id, input, projectPath = DEFAULT_PROJECT
     oldPath: original.path,
     newPath: item?.path || publicItemPath(projectPath, targetPath),
     moved: original.path !== (item?.path || publicItemPath(projectPath, targetPath)),
+    warnings,
     backlog: updatedBacklog,
   };
+}
+
+export async function appendBacklogItemActivity(id, note, projectPath = DEFAULT_PROJECT_PATH) {
+  const text = String(note ?? '').trim();
+  if (!text) return { error: 'Activity note is required.', statusCode: 400 };
+  const backlog = await readBacklogItems(projectPath);
+  const item = backlog.items.find((candidate) => candidate.id === id);
+  if (!item) return { error: `Backlog item not found: ${id}`, statusCode: 404 };
+  return updateBacklogItem(id, {
+    title: item.title,
+    status: item.status,
+    priority: item.priority,
+    effort: item.effort,
+    release: item.release,
+    tags: item.tags,
+    blocks: item.blocks,
+    blocked_by: item.blocked_by,
+    sprint: item.sprint,
+    activityEntry: activityEntry(`Note: ${text}`),
+  }, projectPath);
+}
+
+export async function searchBacklogItems(query, projectPath = DEFAULT_PROJECT_PATH) {
+  const q = String(query ?? '').trim().toLowerCase();
+  const backlog = await readBacklogItems(projectPath);
+  if (!q) return { query: '', items: [] };
+  const items = backlog.items
+    .map((item) => {
+      const haystack = [item.id, item.title, item.status, item.release, item.rawBody].join('\n');
+      const index = haystack.toLowerCase().indexOf(q);
+      if (index === -1) return null;
+      const start = Math.max(0, index - 48);
+      const end = Math.min(haystack.length, index + q.length + 72);
+      return {
+        id: item.id,
+        title: item.title,
+        status: item.status,
+        priority: item.priority,
+        effort: item.effort,
+        release: item.release,
+        path: item.path,
+        excerpt: `${start > 0 ? '...' : ''}${haystack.slice(start, end).replace(/\s+/g, ' ').trim()}${end < haystack.length ? '...' : ''}`,
+      };
+    })
+    .filter(Boolean);
+  return { query: q, items };
+}
+
+export async function getSavedViews(projectPath = DEFAULT_PROJECT_PATH) {
+  const meta = await readPmMeta(projectPath);
+  return Array.isArray(meta.savedViews) ? meta.savedViews : [];
+}
+
+export async function saveSavedViews(projectPath = DEFAULT_PROJECT_PATH, savedViews = []) {
+  const metaPath = path.join(projectPath, '.pm-meta.json');
+  const meta = await readPmMeta(projectPath);
+  meta.savedViews = savedViews.map((view) => ({
+    id: String(view.id || crypto.randomUUID()).trim(),
+    name: String(view.name || 'Saved view').trim(),
+    filters: view.filters || {},
+  }));
+  await atomicWriteFile(metaPath, `${JSON.stringify(meta, null, 2)}\n`);
+  return meta.savedViews;
+}
+
+export async function fixValidationFinding(projectPath = DEFAULT_PROJECT_PATH, input = {}) {
+  const action = String(input.action || '').trim();
+  if (action === 'regenerate-index') {
+    const backlog = await readBacklogItems(projectPath);
+    await atomicWriteFile(path.join(projectPath, 'BACKLOG.md'), generateBacklogIndex(backlog));
+    await updatePmMeta(projectPath, todayIsoDate());
+    return { action, fixed: true };
+  }
+  if (action === 'move-item') {
+    const id = String(input.id || '').trim();
+    const backlog = await readBacklogItems(projectPath);
+    const item = backlog.items.find((candidate) => candidate.id === id);
+    if (!item) return { error: `Backlog item not found: ${id}`, statusCode: 404 };
+    const result = await updateBacklogItem(id, {
+      title: item.title,
+      status: item.status,
+      priority: item.priority,
+      effort: item.effort,
+      release: item.release,
+      tags: item.tags,
+      blocks: item.blocks,
+      blocked_by: item.blocked_by,
+      sprint: item.sprint,
+    }, projectPath);
+    return { action, fixed: !result.error, result };
+  }
+  return { error: `Unsupported validation fix: ${action}`, statusCode: 400 };
 }
 
 function releaseFileMarkdown(version, date, itemIds = []) {
@@ -1421,8 +1592,7 @@ async function ensureReleaseFile(projectPath, version, initialIds = []) {
 }
 
 function shouldPlanStatus(status) {
-  const planned = STATUS_PROGRESS.get('Planned');
-  return (STATUS_PROGRESS.get(status) ?? 0) < planned;
+  return status === 'Backlog';
 }
 
 export async function assignItemsToRelease(input = {}, projectPath = DEFAULT_PROJECT_PATH) {
@@ -1437,11 +1607,11 @@ export async function assignItemsToRelease(input = {}, projectPath = DEFAULT_PRO
   const originals = itemIds.map((id) => backlog.items.find((item) => item.id === id));
   const missing = itemIds.filter((id, index) => !originals[index]);
   if (missing.length) return { error: `Backlog item not found: ${missing.join(', ')}`, statusCode: 404 };
-  const deployed = originals.filter((item) => item.status === 'Deployed');
-  if (deployed.length) return { error: `Deployed items cannot be reassigned: ${deployed.map((item) => item.id).join(', ')}`, statusCode: 400 };
+  const done = originals.filter((item) => item.status === 'Done');
+  if (done.length) return { error: `Done items cannot be reassigned: ${done.map((item) => item.id).join(', ')}`, statusCode: 400 };
 
-  if (originals.some((item) => item.status === 'Clarifying')) {
-    warnings.push('Clarifying items need review before being planned.');
+  if (originals.some((item) => item.status === 'Backlog')) {
+    warnings.push('Backlog items should be reviewed before being assigned to a release.');
   }
 
   let releaseFileCreated = false;
@@ -1459,7 +1629,7 @@ export async function assignItemsToRelease(input = {}, projectPath = DEFAULT_PRO
   for (const item of originals) {
     const nextStatus = release === 'Unassigned'
       ? item.status
-      : shouldPlanStatus(item.status) ? 'Planned' : item.status;
+      : shouldPlanStatus(item.status) ? 'Ready' : item.status;
     await updateBacklogItem(item.id, {
       title: item.title,
       status: nextStatus,
@@ -1485,10 +1655,10 @@ export async function assignItemsToRelease(input = {}, projectPath = DEFAULT_PRO
 
 function computeReleaseReadiness(itemIds, itemById) {
   const items = itemIds.map((id) => itemById.get(id)).filter(Boolean);
-  if (items.length && items.every((item) => ['Ready to Deploy', 'Passed Testing'].includes(item.status))) return 'Ready to Deploy';
+  if (items.length && items.every((item) => ['Ready to Release', 'Done'].includes(item.status))) return 'Ready to Release';
   if (items.some((item) => item.status === 'Blocked')) return 'Blocked';
-  if (items.some((item) => item.status === 'Ready for Testing')) return 'Ready for Human Testing';
-  if (items.some((item) => item.status === 'In Development')) return 'In Development';
+  if (items.some((item) => item.status === 'Needs Validation')) return 'Needs Validation';
+  if (items.some((item) => item.status === 'In Progress')) return 'In Progress';
   return 'Planning';
 }
 
@@ -1538,7 +1708,7 @@ export async function getReleasePlanner(projectPath = DEFAULT_PROJECT_PATH) {
         itemIds: release.itemIds,
         items,
         statusCounts: countItemsByStatus(items),
-        attentionItems: items.filter((item) => ['Blocked', 'Clarifying', 'Failed Testing', 'Missing'].includes(item.status)),
+        attentionItems: items.filter((item) => ['Blocked', 'Backlog', 'Missing'].includes(item.status)),
         promptStatus: {
           codexPromptGenerated: releaseSectionGenerated(release, 'Codex Development Prompt', /not generated yet/i),
           checklistGenerated: releaseSectionGenerated(release, 'Human Testing Checklist', /not generated yet/i),
@@ -1567,6 +1737,49 @@ export async function createRelease(version, projectPath = DEFAULT_PROJECT_PATH)
   }
   await fs.writeFile(releasePath, releaseFileMarkdown(release, todayIsoDate(), []), { encoding: 'utf8', flag: 'wx' });
   return { id: release, path: publicItemPath(projectPath, releasePath), created: true };
+}
+
+function releaseFrontMatterMarkdown(data) {
+  return [
+    '---',
+    yamlLine('id', data.id),
+    yamlLine('title', data.title || `Release ${data.id}`),
+    yamlLine('status', data.status || 'Planning'),
+    yamlLine('created', data.created),
+    yamlLine('developed', data.developed),
+    yamlLine('tested', data.tested),
+    yamlLine('deployed', data.deployed),
+    '---',
+  ].join('\n');
+}
+
+export async function updateReleaseMetadata(id, input = {}, projectPath = DEFAULT_PROJECT_PATH) {
+  const releaseId = String(id ?? '').trim();
+  if (!releaseId || !/^[A-Za-z0-9._-]+$/.test(releaseId)) return { error: 'Invalid release ID.', statusCode: 400 };
+  const releasesRoot = path.resolve(projectPath, 'releases');
+  const releasePath = path.resolve(releasesRoot, `${releaseId}.md`);
+  assertWithin(releasesRoot, releasePath);
+  let markdown = '';
+  try {
+    markdown = await fs.readFile(releasePath, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return { error: `Release not found: ${releaseId}`, statusCode: 404 };
+    throw error;
+  }
+  const parsed = parseFrontMatter(markdown);
+  const data = { ...parsed.data };
+  const status = String(input.status ?? data.status ?? 'Planning').trim() || 'Planning';
+  const date = todayIsoDate();
+  data.id = releaseId;
+  data.title = data.title || `Release ${releaseId}`;
+  data.status = status;
+  data.created = data.created || date;
+  if (['Active', 'In Development'].includes(status) && !data.developed) data.developed = date;
+  if (['Testing', 'Ready for Human Testing'].includes(status) && !data.tested) data.tested = date;
+  if (['Released', 'Deployed'].includes(status) && !data.deployed) data.deployed = date;
+  const nextMarkdown = `${releaseFrontMatterMarkdown(data)}\n\n${parsed.body.trimStart()}`;
+  await atomicWriteFile(releasePath, nextMarkdown.endsWith('\n') ? nextMarkdown : `${nextMarkdown}\n`);
+  return { id: releaseId, path: publicItemPath(projectPath, releasePath), release: data };
 }
 
 const SCOPE_RULE = 'Do not redesign, refactor, restructure, or expand scope unless the backlog item explicitly requires it. If scope expansion is necessary, stop and ask the requester.';
@@ -1871,7 +2084,7 @@ export async function getControlManagerStatus(projectPath = DEFAULT_PROJECT_PATH
 
 export async function getPromotionRecommendations(projectPath = DEFAULT_PROJECT_PATH) {
   const backlog = await readBacklogItems(projectPath);
-  const eligibleStatuses = new Set(['Ready to Deploy', 'Passed Testing']);
+  const eligibleStatuses = new Set(['Ready to Release']);
   const items = backlog.items
     .filter((item) => eligibleStatuses.has(item.status))
     .map((item) => ({
@@ -1937,7 +2150,7 @@ export async function buildControlApprovalPackage(projectPath = DEFAULT_PROJECT_
   if (unaccountedFiles.length) risks.push(`Unaccounted dirty files: ${unaccountedFiles.join(', ')}`);
   if (!selectedFiles.length) risks.push('No files selected for the proposed action.');
   if (secretFindings.length) risks.push(...secretFindings);
-  if (!recommendations.itemCount) risks.push('No backlog items are currently Ready to Deploy or Passed Testing.');
+  if (!recommendations.itemCount) risks.push('No backlog items are currently Ready to Release.');
   return {
     repoRoot: status.repoRoot,
     branch: status.branch,
@@ -2046,6 +2259,10 @@ export async function readBacklogItems(projectPath = DEFAULT_PROJECT_PATH) {
         priority: data.priority || '',
         effort: data.effort || '',
         release: data.release || '',
+        tags: normalizeTokenList(data.tags),
+        blocks: normalizeItemIdList(data.blocks),
+        blocked_by: normalizeItemIdList(data.blocked_by),
+        sprint: data.sprint || '',
         created: data.created || '',
         developed: data.developed || '',
         updated: data.updated || '',
@@ -2370,6 +2587,14 @@ export function createServer(options = {}) {
       }
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/backlog/search') {
+      try {
+        return sendJson(res, await searchBacklogItems(url.searchParams.get('q') || '', projectPath));
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/validation/meta') {
       try {
         return sendJson(res, {
@@ -2384,6 +2609,16 @@ export function createServer(options = {}) {
     if (req.method === 'POST' && url.pathname === '/api/backlog/validate') {
       try {
         return sendJson(res, await validateBacklog(projectPath, { updateMeta: true }));
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/backlog/fix') {
+      try {
+        const result = await fixValidationFinding(projectPath, await readJsonBody(req));
+        if (result.error) return sendJson(res, result, result.statusCode || 400);
+        return sendJson(res, result);
       } catch (error) {
         return sendError(res, 500, error.message);
       }
@@ -2410,9 +2645,49 @@ export function createServer(options = {}) {
       }
     }
 
+    const activityMatch = url.pathname.match(/^\/api\/backlog\/items\/([^/]+)\/activity$/);
+    if (req.method === 'POST' && activityMatch) {
+      try {
+        const body = await readJsonBody(req);
+        const result = await appendBacklogItemActivity(decodeURIComponent(activityMatch[1]), body.note, projectPath);
+        if (result.error) return sendError(res, result.statusCode || 400, result.error);
+        return sendJson(res, result);
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/saved-views') {
+      try {
+        return sendJson(res, { savedViews: await getSavedViews(projectPath) });
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/saved-views') {
+      try {
+        const body = await readJsonBody(req);
+        return sendJson(res, { savedViews: await saveSavedViews(projectPath, body.savedViews || []) });
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/releases') {
       try {
         return sendJson(res, await getReleasePlanner(projectPath));
+      } catch (error) {
+        return sendError(res, 500, error.message);
+      }
+    }
+
+    const releaseMatch = url.pathname.match(/^\/api\/releases\/([^/]+)$/);
+    if (releaseMatch && req.method === 'PUT') {
+      try {
+        const result = await updateReleaseMetadata(decodeURIComponent(releaseMatch[1]), await readJsonBody(req), projectPath);
+        if (result.error) return sendJson(res, result, result.statusCode || 400);
+        return sendJson(res, result);
       } catch (error) {
         return sendError(res, 500, error.message);
       }
@@ -2510,6 +2785,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const portArgIndex = process.argv.indexOf('--port');
   const port = Number(process.env.PORT || (portArgIndex !== -1 ? process.argv[portArgIndex + 1] : 4173));
   const server = createServer();
+
+  server.on('error', (err) => {
+    console.error('Server error:', err.message);
+    process.exit(1);
+  });
 
   server.listen(port, () => {
     console.log(`PM Tools app running at http://localhost:${port}`);

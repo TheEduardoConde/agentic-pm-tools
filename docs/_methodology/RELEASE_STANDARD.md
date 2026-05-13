@@ -47,21 +47,20 @@ deployed:
 ## Status Values
 
 - Planning
-- Ready for Development
-- In Development
-- Development Complete
-- Ready for Human Testing
-- Ready to Deploy
-- Deployed
+- In Progress
+- Needs Validation
+- Ready to Release
+- Released
 - Blocked
 - Cancelled
 
 ## Readiness
 
-A release can move to `Ready to Deploy` only when every included backlog item is in one of these statuses:
+A release can move to `Ready to Release` only when every included backlog item is in this backlog item status:
 
-- `Ready to Deploy`: item passed automated validation and human testing was not applicable.
-- `Passed Testing`: item required human testing and was approved by the authorized reviewer.
+- `Ready to Release`: item passed automated validation and any required human, owner, security, policy, or release evidence review is complete.
+
+A release can move to `Released` only after the approved version-control, deployment, publication, tag, or external release action is complete.
 
 ## Approval Gates
 
@@ -70,4 +69,3 @@ Gate 1, Approve Release Readiness: confirms release work is functionally accepta
 Gate 2, Approve Version-Control or Deployment Action: confirms the exact Git, release, tag, deploy, or publish action to execute.
 
 Agents may prepare release and version-control actions, but must not execute commit, push, PR, merge, deploy, release, tag, rebase, or force-push actions without explicit approval.
-

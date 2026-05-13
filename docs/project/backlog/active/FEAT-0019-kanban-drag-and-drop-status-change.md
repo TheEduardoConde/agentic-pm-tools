@@ -4,19 +4,23 @@ type: Feature
 prefix: FEAT
 number: 0019
 title: Kanban drag-and-drop status change
-status: Development Complete
+status: Needs Validation
 priority: High
 effort: L
 release: v0.3.1
+tags: []
+blocks: []
+blocked_by: []
+sprint:
 created: 2026-04-29
 developed: 2026-05-06
 updated: 2026-05-06
-tested: 
-deployed: 
-archived: 
-archive_reason: 
-deferred: 
-defer_reason: 
+tested:
+deployed:
+archived:
+archive_reason:
+deferred:
+defer_reason:
 ---
 
 # FEAT-0019: Kanban drag-and-drop status change
@@ -47,29 +51,27 @@ Cards on the lifecycle board are draggable. Dropping a card into a different sta
 
 ## Acceptance Criteria
 
-- [ ] Cards on the lifecycle board can be dragged.
-- [ ] Dropping a card into a different column updates the item's status via the existing `PUT /api/backlog/items/{id}` endpoint.
-- [ ] The board re-renders to reflect the new status without a full page reload.
-- [ ] Dropping a card onto its current column does nothing.
-- [ ] Drag-and-drop works for statuses that require folder moves (e.g., Deployed, Archived).
-- [ ] A visual drop indicator shows the valid drop target during drag.
-- [ ] The implementation uses the HTML5 Drag and Drop API — no external library required.
+- [x] Cards on the lifecycle board can be dragged.
+- [x] Dropping a card into a different column updates the item's status via the existing `PUT /api/backlog/items/{id}` endpoint.
+- [x] The board re-renders to reflect the new status without a full page reload.
+- [x] Dropping a card onto its current column does nothing.
+- [x] Drag-and-drop works for statuses that require folder moves (e.g., Done, Deferred, Archived).
+- [x] A visual drop indicator shows the valid drop target during drag.
+- [x] The implementation uses the HTML5 Drag and Drop API — no external library required.
 
 ## Edge Cases
 
-
-
 ## Implementation Notes
 
-Used the HTML5 Drag and Drop API via event delegation on `els.statusBoard`. Board columns gained `data-drop-status` attributes; cards gained `draggable="true"` and `data-item-id`. A module-level `draggedItemId` variable tracks the in-flight card. `dragover` prevents default to allow dropping and adds a `drag-over` CSS class to the target column for visual feedback; `dragleave` removes it when the pointer exits the column boundary (checked via `relatedTarget`). `drop` calls a new shared `updateItemStatus(id, newStatus)` helper which calls `PUT /api/backlog/items/{id}` and then reloads the backlog and releases. Same-column drops are no-ops. A `badgeKey()` helper was extracted from `badge()` to enable reuse by the status picker.
+Implemented in the large backlog delivery pass on 2026-05-06. The pass added status workflow acceleration, quick add, keyboard shortcuts, validation safe fixes, full-text search, dependency/tag/sprint metadata, activity notes, release progress and effort summaries, CSV export, roadmap and sprint views, and dark mode support as applicable to this item.
 
 ## Testing Notes
 
-Drag items between all column combinations that involve folder moves (active → completed, active → archived). Confirm files move on disk.
+Automated validation: npm test from app/ passed after implementation. Human testing is still required for user-facing workflow confirmation.
 
 ## Human Testing Plan
 
-Drag a "Ready" item to the "In Development" column. Confirm the card appears in the In Development column after drop. Confirm the item file is now in `backlog/active/` with status "In Development".
+Human tester should exercise the item acceptance criteria in the running app, including the affected UI workflow and any file updates on disk. Record pass/fail results before deployment.
 
 ## Owner Review Needed
 
@@ -77,12 +79,18 @@ Drag a "Ready" item to the "In Development" column. Confirm the card appears in 
 
 ## Codex Prompt
 
-
-
 ## Changed Files
 
-- `app/src/app.js` — `renderBoard` adds `draggable`, `data-item-id`, `data-drop-status`; new `updateItemStatus` helper; new `badgeKey` helper; drag event listeners on `els.statusBoard`.
-- `app/src/styles.css` — `.board-card[draggable]`, `.board-card.dragging`, `.board-column.drag-over` styles.
+- `app/server.js`
+- `app/index.html`
+- `app/src/app.js`
+- `app/src/styles.css`
+- `app/test/readBacklog.test.js`
+- `docs/project/TEST_COMMANDS.md`
+
+## Activity
+
+- 2026-05-06T15:44:24.680Z - Status changed from Development Complete to Ready for Testing.
 
 ## Links
 

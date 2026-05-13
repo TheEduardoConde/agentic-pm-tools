@@ -17,11 +17,18 @@ Describe the work completed.
 
 Summarize the implementation.
 
-## Automated Tests Run
+## Automated Test Plan
+
+- Planned command/check:
+  - Purpose:
+  - Acceptance criteria covered:
+
+## Automated Test Results
 
 - Command:
   - Result:
   - Relevant output:
+  - Notes / limitations:
 
 ## Tests Not Run
 
@@ -31,13 +38,17 @@ Summarize the implementation.
 ## Human Testing Plan
 
 - Applicable: Yes / No
-- Plan or reason not applicable:
+- Preconditions:
+- Steps:
+- Expected results:
+- Exit criteria:
+- Reason not applicable, if applicable:
 
 ## Security Check
 
 - Security-Relevant Change? Yes / No
 - Checks Performed:
-- Result: Pass / Needs Review / Not Applicable
+- Result: Pass / Review Required / Not Applicable
 - Notes:
 
 ## Backlog Updates Made

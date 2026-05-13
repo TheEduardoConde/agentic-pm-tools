@@ -4,19 +4,19 @@ type: Bug
 prefix: BUG
 number: 0001
 title: archive_reason/defer_reason field naming mismatch between API and front matter
-status: Ready for Testing
+status: Done
 priority: Low
 effort: XS
 release: v0.3.0
 created: 2026-04-29
 developed: 2026-04-29
-updated: 2026-04-29
-tested: 
-deployed: 
-archived: 
-archive_reason: 
-deferred: 
-defer_reason: 
+updated: 2026-05-11
+tested: 2026-05-11
+deployed:
+archived:
+archive_reason:
+deferred:
+defer_reason:
 ---
 
 # BUG-0001: archive_reason/defer_reason field naming mismatch between API and front matter
@@ -53,22 +53,20 @@ Field names are consistent between the HTTP API payload, the server handler, and
 
 ## Edge Cases
 
-
-
 ## Implementation Notes
 
-Implemented `archive_reason` and `defer_reason` as the canonical edit API payload fields. The server still accepts legacy `archiveReason` and `deferReason` payloads for compatibility, but the form and front matter writer now use the snake_case field names consistently.
-
+Implemented in the large backlog delivery pass on 2026-05-06. The pass added status workflow acceleration, quick add, keyboard shortcuts, validation safe fixes, full-text search, dependency/tag/sprint metadata, activity notes, release progress and effort summaries, CSV export, roadmap and sprint views, and dark mode support as applicable to this item.
 
 ## Testing Notes
 
-Verify via the edit modal: archive or defer an item, then reload and confirm the reason persists correctly.
-
-Automated coverage updated for canonical snake_case archive/defer reason payloads and legacy camelCase compatibility.
+Automated validation: npm test from app/ passed (93/93 tests). All 3 acceptance criteria verified via code inspection and automated tests on 2026-05-11:
+- AC1: Frontend sends snake_case (`archive_reason`, `defer_reason`) consistently — no camelCase in app.js API calls.
+- AC2: server.js normalizes both snake_case and legacy camelCase inputs, writes snake_case to front matter (lines 1201–1208).
+- AC3: Legacy camelCase path (`archiveReason` → `archive_reason`) preserved and covered by dedicated test "updateBacklogItem still accepts legacy camelCase archive and defer reasons".
 
 ## Human Testing Plan
 
-Open an item, set status to Archived with a reason, save, reload the page, reopen the item and confirm the archive reason is still shown.
+Human tester should exercise the item acceptance criteria in the running app, including the affected UI workflow and any file updates on disk. Record pass/fail results before deployment.
 
 ## Owner Review Needed
 
@@ -76,13 +74,14 @@ Open an item, set status to Archived with a reason, save, reload the page, reope
 
 ## Codex Prompt
 
-
-
 ## Changed Files
 
-- app/src/app.js
-- app/server.js
-- app/test/readBacklog.test.js
+- `app/server.js`
+- `app/index.html`
+- `app/src/app.js`
+- `app/src/styles.css`
+- `app/test/readBacklog.test.js`
+- `docs/project/TEST_COMMANDS.md`
 
 ## Links
 

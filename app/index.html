@@ -14,8 +14,10 @@
           <span class="brand-mark">PM</span>
           <strong>PM Tools</strong>
         </div>
-        <button class="nav-link active" data-view-target="backlog" type="button">Backlog Dashboard</button>
+        <button class="nav-link" data-view-target="backlog" type="button">Backlog Dashboard</button>
         <button class="nav-link" data-view-target="releases" type="button">Releases</button>
+        <button class="nav-link" data-view-target="sprints" type="button">Sprints</button>
+        <button class="nav-link" data-view-target="roadmap" type="button">Roadmap</button>
         <button class="nav-link" data-view-target="validation" type="button">Validation</button>
         <button class="nav-link" data-view-target="prompts" type="button">Prompts</button>
         <button class="nav-link" data-view-target="settings" type="button">Settings</button>
@@ -37,6 +39,7 @@
               <div id="activeProjectMenu" class="project-picker-menu" hidden></div>
               <select id="activeProjectSelect" hidden></select>
             </div>
+            <button id="themeToggleBtn" type="button" class="secondary">Dark</button>
             <button id="addItemBtn" type="button">Add Backlog Item</button>
             <button id="refreshBtn" type="button" class="secondary">Refresh</button>
           </div>
@@ -46,10 +49,10 @@
           <section class="dashboard-context-strip" aria-label="Project context">
             <div class="ctx-stat ctx-total"><span class="ctx-label">Total</span><strong id="itemCount">0</strong></div>
             <div class="ctx-stat ctx-active"><span class="ctx-label">Active</span><strong id="activeCount">0</strong></div>
-            <div class="ctx-stat ctx-build"><span class="ctx-label">In Development</span><strong id="developmentCount">0</strong></div>
-            <div class="ctx-stat ctx-new"><span class="ctx-label">New</span><strong id="newCount">0</strong></div>
-            <div class="ctx-stat ctx-testing"><span class="ctx-label">Passed Testing</span><strong id="passedTestingCount">0</strong></div>
-            <div class="ctx-stat ctx-completed"><span class="ctx-label">Completed</span><strong id="completedCount">0</strong></div>
+            <div class="ctx-stat ctx-build"><span class="ctx-label">In Progress</span><strong id="developmentCount">0</strong></div>
+            <div class="ctx-stat ctx-new"><span class="ctx-label">Backlog</span><strong id="newCount">0</strong></div>
+            <div class="ctx-stat ctx-testing"><span class="ctx-label">Ready Release</span><strong id="passedTestingCount">0</strong></div>
+            <div class="ctx-stat ctx-completed"><span class="ctx-label">Done</span><strong id="completedCount">0</strong></div>
           </section>
 
           <section class="dashboard-grid">
@@ -58,11 +61,11 @@
               <div id="needsAttention" class="attention-list"></div>
             </article>
             <article class="dashboard-panel panel-testing">
-              <h2>Ready for Human Testing</h2>
+              <h2>Needs Validation</h2>
               <div id="readyForTesting" class="attention-list"></div>
             </article>
             <article class="dashboard-panel panel-success">
-              <h2>Ready to Deploy</h2>
+              <h2>Ready to Release</h2>
               <div id="readyToDeploy" class="attention-list"></div>
             </article>
             <article class="dashboard-panel panel-info">
@@ -81,14 +84,21 @@
 
           <section class="filters" aria-label="Backlog filters">
             <label>Search<input id="searchFilter" type="search" placeholder="ID, title, status, release..."></label>
+            <label class="checkbox-label"><input id="fullTextSearchToggle" type="checkbox"> Full text</label>
             <label>Type<select id="typeFilter"><option value="">All types</option></select></label>
             <label>Status<select id="statusFilter"><option value="">All statuses</option></select></label>
             <label>Priority<select id="priorityFilter"><option value="">All priorities</option></select></label>
             <label>Effort<select id="effortFilter"><option value="">All efforts</option></select></label>
             <label>Release<select id="releaseFilter"><option value="">All releases</option></select></label>
+            <label>Tag<select id="tagFilter"><option value="">All tags</option></select></label>
             <label>Folder<select id="folderFilter"><option value="">All folders</option></select></label>
             <label>Sort<select id="sortSelect"><option value="updated">Updated</option><option value="priority">Priority</option><option value="status">Status</option><option value="release">Release</option></select></label>
+            <button id="saveViewBtn" type="button" class="secondary">Save View</button>
+            <select id="savedViewSelect"><option value="">Saved views...</option></select>
+            <button id="renameViewBtn" type="button" class="secondary">Rename</button>
+            <button id="deleteViewBtn" type="button" class="secondary">Delete</button>
           </section>
+          <div id="fullTextResults" class="search-results" hidden></div>
 
           <section class="action-bar">
             <span id="selectionCount">0 selected</span>
@@ -101,6 +111,7 @@
               <button id="bulkStatusBtn" type="button" class="secondary">Change Status</button>
             </div>
             <button id="goReleasesBtn" type="button" class="secondary">Assign in Releases</button>
+            <button id="exportCsvBtn" type="button" class="secondary">Export CSV</button>
           </section>
 
           <section class="table-section">
@@ -113,12 +124,32 @@
               <table>
                 <thead>
                   <tr>
-                    <th>Select</th><th data-sort="id">ID</th><th data-sort="type">Type</th><th data-sort="title">Title</th><th data-sort="status">Status</th><th data-sort="priority">Priority</th><th data-sort="effort">Effort</th><th data-sort="release">Release</th><th data-sort="updated">Updated</th><th data-sort="folder">Folder</th><th>Open</th>
+                    <th>Select</th><th data-sort="id">ID</th><th data-sort="type">Type</th><th data-sort="title">Title</th><th data-sort="status">Status</th><th data-sort="priority">Priority</th><th data-sort="effort">Effort</th><th data-sort="release">Release</th><th data-sort="updated">Updated</th><th data-sort="folder">Folder</th><th>Tags</th><th>Open</th>
                   </tr>
                 </thead>
-                <tbody id="backlogRows"><tr><td colspan="11" class="empty">Loading backlog...</td></tr></tbody>
+                <tbody id="backlogRows"><tr><td colspan="12" class="empty">Loading backlog...</td></tr></tbody>
               </table>
             </div>
+          </section>
+        </section>
+
+        <section class="view-section" data-view="sprints">
+          <section class="planning-view">
+            <div class="section-header">
+              <h2>Sprint Planning</h2>
+              <label>Capacity<input id="sprintCapacityInput" type="number" min="1" step="1" value="10"></label>
+            </div>
+            <div id="sprintBoard" class="planning-board"></div>
+          </section>
+        </section>
+
+        <section class="view-section" data-view="roadmap">
+          <section class="planning-view">
+            <div class="section-header">
+              <h2>Roadmap Timeline</h2>
+              <span>Grouped by release</span>
+            </div>
+            <div id="roadmapBoard" class="roadmap-board"></div>
           </section>
         </section>
 

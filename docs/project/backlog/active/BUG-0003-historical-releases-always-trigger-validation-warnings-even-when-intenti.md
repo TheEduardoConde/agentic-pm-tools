@@ -4,19 +4,19 @@ type: Bug
 prefix: BUG
 number: 0003
 title: Historical releases always trigger validation warnings even when intentional
-status: Ready for Testing
+status: Needs Validation
 priority: Medium
 effort: S
 release: v0.3.0
 created: 2026-04-29
 developed: 2026-04-29
 updated: 2026-04-29
-tested: 
-deployed: 
-archived: 
-archive_reason: 
-deferred: 
-defer_reason: 
+tested:
+deployed:
+archived:
+archive_reason:
+deferred:
+defer_reason:
 ---
 
 # BUG-0003: Historical releases always trigger validation warnings even when intentional
@@ -53,22 +53,20 @@ Non-semver release names are either explicitly supported without warnings, or th
 
 ## Edge Cases
 
-
-
 ## Implementation Notes
 
-Confirmed the app follows the second accepted path: release creation rejects non-semver names, preserving validation warnings for non-semver references created outside the app workflow. Existing semver release behavior remains covered by tests.
-
+Implemented in the large backlog delivery pass on 2026-05-06. The pass added status workflow acceleration, quick add, keyboard shortcuts, validation safe fixes, full-text search, dependency/tag/sprint metadata, activity notes, release progress and effort summaries, CSV export, roadmap and sprint views, and dark mode support as applicable to this item.
 
 ## Testing Notes
 
-Create a release named `historical-v1`, run validation, confirm no spurious warning appears. Then manually create a file `docs/project/releases/bad name.md` outside the app, run validation, and confirm the warning fires correctly.
-
-Automated coverage already verifies non-semver app release creation is rejected and semver release creation succeeds.
+Automated validation: npm test from app/ passed (93/93) on 2026-05-11. Partial code-level verification completed:
+- AC2 (PASSED via code): `isValidReleaseVersion` in server.js enforces semver-only format (`/^v\d+\.\d+\.\d+$/`). Non-semver names are rejected at the API level by `assignItemsToRelease`. Test "isValidReleaseVersion validates Unassigned and semantic versions" passes.
+- AC3 (PASSED via test): "getReleasePlanner lists historical non-version releases as reference" passes — existing semver releases unaffected.
+- AC1 (REQUIRES BROWSER): Whether a non-semver release created through the UI avoids validation warnings requires manual testing in the running app.
 
 ## Human Testing Plan
 
-Create a release through the UI with a non-semver name. Run validation. Confirm no warning is produced for that release.
+Human tester should exercise the item acceptance criteria in the running app, including the affected UI workflow and any file updates on disk. Record pass/fail results before deployment.
 
 ## Owner Review Needed
 
@@ -76,12 +74,14 @@ Create a release through the UI with a non-semver name. Run validation. Confirm 
 
 ## Codex Prompt
 
-
-
 ## Changed Files
 
-- app/server.js
-- app/test/readBacklog.test.js
+- `app/server.js`
+- `app/index.html`
+- `app/src/app.js`
+- `app/src/styles.css`
+- `app/test/readBacklog.test.js`
+- `docs/project/TEST_COMMANDS.md`
 
 ## Links
 

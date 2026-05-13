@@ -7,6 +7,7 @@ import {
   createBacklogItem,
   addProjectToConfig,
   analyzeProjectPath,
+  appendBacklogItemActivity,
   assignItemsToRelease,
   createServer,
   createRelease,
@@ -14,12 +15,16 @@ import {
   generatePrompt,
   generateVersionControlPrompt,
   buildControlApprovalPackage,
+  fixValidationFinding,
+  getSavedViews,
   getReleasePlanner,
   getNextSequenceNumber,
   getPromotionRecommendations,
   loadControlMethodology,
   resolveGitRepoRoot,
   runControlManagerAction,
+  saveSavedViews,
+  searchBacklogItems,
   isValidReleaseVersion,
   parseBodySections,
   parseFrontMatter,
@@ -31,6 +36,7 @@ import {
   slugifyTitle,
   typeFromPrefix,
   updateBacklogItem,
+  updateReleaseMetadata,
   updateProjectInConfig,
   updateRecentProjects,
   validateBacklog,
@@ -88,7 +94,7 @@ await runTest('parseFrontMatter extracts scalar fields', () => {
   const parsed = parseFrontMatter(`---
 id: TEST-0001
 title: Sample item
-status: New
+status: Backlog
 priority: Medium
 ---
 
@@ -97,7 +103,7 @@ priority: Medium
 
   assert.equal(parsed.data.id, 'TEST-0001');
   assert.equal(parsed.data.title, 'Sample item');
-  assert.equal(parsed.data.status, 'New');
+  assert.equal(parsed.data.status, 'Backlog');
   assert.equal(parsed.data.priority, 'Medium');
   assert.ok(parsed.body.includes('# Body'));
 });
@@ -267,7 +273,7 @@ await runTest('createBacklogItem creates valid markdown and regenerates BACKLOG 
   assert.ok(markdown.includes('id: PM-0000'));
   assert.ok(markdown.includes('type: Project Management'));
   assert.ok(markdown.includes('prefix: PM'));
-  assert.ok(markdown.includes('status: New'));
+  assert.ok(markdown.includes('status: Backlog'));
   assert.ok(markdown.includes('release: Unassigned'));
   assert.ok(markdown.includes('- [ ] File is created'));
   assert.ok(markdown.includes('- [ ] BACKLOG.md includes the item'));
@@ -347,7 +353,7 @@ await runTest('updateBacklogItem rejects Type changes that conflict with immutab
   }, projectPath);
   const result = await updateBacklogItem('PM-0000', {
     title: 'Immutable prefix',
-    status: 'New',
+    status: 'Backlog',
     priority: 'Medium',
     effort: 'Unknown',
     release: 'Unassigned',
@@ -399,7 +405,7 @@ await runTest('updateBacklogItem moves status changes to the correct folder', as
 
   const result = await updateBacklogItem('PM-0000', {
     title: 'Deploy me',
-    status: 'Deployed',
+    status: 'Done',
     priority: 'Medium',
     effort: 'Unknown',
     release: 'Unassigned',
@@ -411,7 +417,7 @@ await runTest('updateBacklogItem moves status changes to the correct folder', as
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await runTest('updateBacklogItem sets deployed date when status becomes Deployed', async () => {
+await runTest('updateBacklogItem sets deployed date when status becomes Done', async () => {
   const { dir, projectPath } = makeProjectFixture();
   await createBacklogItem({
     prefix: 'PM',
@@ -424,7 +430,7 @@ await runTest('updateBacklogItem sets deployed date when status becomes Deployed
 
   const result = await updateBacklogItem('PM-0000', {
     title: 'Deploy date',
-    status: 'Deployed',
+    status: 'Done',
     priority: 'Medium',
     effort: 'Unknown',
     release: 'Unassigned',
@@ -434,7 +440,7 @@ await runTest('updateBacklogItem sets deployed date when status becomes Deployed
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await runTest('updateBacklogItem sets tested date when status becomes Passed Testing', async () => {
+await runTest('updateBacklogItem sets tested date when status becomes Ready to Release', async () => {
   const { dir, projectPath } = makeProjectFixture();
   await createBacklogItem({
     prefix: 'PM',
@@ -447,7 +453,7 @@ await runTest('updateBacklogItem sets tested date when status becomes Passed Tes
 
   const result = await updateBacklogItem('PM-0000', {
     title: 'Tested date',
-    status: 'Passed Testing',
+    status: 'Ready to Release',
     priority: 'Medium',
     effort: 'Unknown',
     release: 'Unassigned',
@@ -534,6 +540,41 @@ await runTest('updateBacklogItem still accepts legacy camelCase archive and defe
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+await runTest('updateBacklogItem supports tags dependencies sprint and activity warnings', async () => {
+  const { dir, projectPath } = makeProjectFixture();
+  await createBacklogItem({ prefix: 'PM', title: 'Blocker', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
+  await createBacklogItem({ prefix: 'PM', title: 'Blocked work', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
+
+  const result = await updateBacklogItem('PM-0001', {
+    title: 'Blocked work',
+    status: 'In Progress',
+    priority: 'Medium',
+    effort: 'S',
+    release: 'Unassigned',
+    tags: ['alpha', 'beta_tag'],
+    blocks: [],
+    blocked_by: ['PM-0000'],
+    sprint: 'Sprint 1',
+  }, projectPath);
+
+  assert.deepEqual(result.item.tags, ['alpha', 'beta_tag']);
+  assert.deepEqual(result.item.blocked_by, ['PM-0000']);
+  assert.equal(result.item.sprint, 'Sprint 1');
+  assert.ok(result.item.sections.Activity.content.includes('Status changed from Backlog to In Progress.'));
+  assert.ok(result.warnings[0].includes('PM-0000'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('appendBacklogItemActivity adds an append-only Activity entry', async () => {
+  const { dir, projectPath } = makeProjectFixture();
+  await createBacklogItem({ prefix: 'PM', title: 'Activity item', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
+
+  const result = await appendBacklogItemActivity('PM-0000', 'Owner reviewed scope.', projectPath);
+
+  assert.ok(result.item.sections.Activity.content.includes('Note: Owner reviewed scope.'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 await runTest('updateBacklogItem renames title slug while preserving ID', async () => {
   const { dir, projectPath } = makeProjectFixture();
   await createBacklogItem({
@@ -547,7 +588,7 @@ await runTest('updateBacklogItem renames title slug while preserving ID', async 
 
   const result = await updateBacklogItem('PM-0000', {
     title: 'New slug value',
-    status: 'New',
+    status: 'Backlog',
     priority: 'Medium',
     effort: 'Unknown',
     release: 'Unassigned',
@@ -574,7 +615,7 @@ id: PM-0000
 prefix: PM
 number: 0000
 title: Zulu
-status: New
+status: Backlog
 priority: Medium
 effort: Unknown
 release: Unassigned
@@ -585,7 +626,7 @@ updated: 2026-04-28
 
   const result = await updateBacklogItem('PM-0000', {
     title: 'Zulu',
-    status: 'New',
+    status: 'Backlog',
     priority: 'Medium',
     effort: 'Unknown',
     release: 'Unassigned',
@@ -599,7 +640,7 @@ await runTest('updateBacklogItem rejects path traversal IDs', async () => {
   const { dir, projectPath } = makeProjectFixture();
   const result = await updateBacklogItem('../PM-0000', {
     title: 'Unsafe',
-    status: 'New',
+    status: 'Backlog',
     priority: 'Medium',
     effort: 'Unknown',
     release: 'Unassigned',
@@ -642,7 +683,7 @@ id: PM-0001
 prefix: PM
 number: 0001
 title: Alpha
-status: New
+status: Backlog
 priority: Medium
 effort: Unknown
 release: Unassigned
@@ -655,7 +696,7 @@ id: PM-0001
 prefix: PM
 number: 0001
 title: Beta
-status: Deployed
+status: Done
 priority: Medium
 effort: Unknown
 release: Unassigned
@@ -674,7 +715,7 @@ await runTest('validateBacklog detects missing required fields', async () => {
 id: PM-0001
 prefix: PM
 title: Missing fields
-status: New
+status: Backlog
 priority: Medium
 ---
 `, 'utf8');
@@ -719,7 +760,7 @@ await runTest('validateBacklog detects invalid release format', async () => {
   }, projectPath);
   await updateBacklogItem('PM-0000', {
     title: 'Release format',
-    status: 'New',
+    status: 'Backlog',
     priority: 'Medium',
     effort: 'Unknown',
     release: 'release-one',
@@ -736,7 +777,7 @@ id: PM-0001
 prefix: PM
 number: 0001
 title: Deployed
-status: Deployed
+status: Done
 priority: Medium
 effort: Unknown
 release: Unassigned
@@ -761,7 +802,7 @@ await runTest('validateBacklog detects missing release file', async () => {
   }, projectPath);
   await updateBacklogItem('PM-0000', {
     title: 'Missing release',
-    status: 'New',
+    status: 'Backlog',
     priority: 'Medium',
     effort: 'Unknown',
     release: 'v0.1.0',
@@ -803,7 +844,7 @@ await runTest('validateBacklog detects item and release membership mismatch', as
   }, projectPath);
   await updateBacklogItem('PM-0000', {
     title: 'Mismatch',
-    status: 'New',
+    status: 'Backlog',
     priority: 'Medium',
     effort: 'Unknown',
     release: 'v0.1.0',
@@ -831,7 +872,7 @@ id: PM-0001
 prefix: PM
 number: 0001
 title: Bad date
-status: New
+status: Backlog
 priority: Medium
 effort: Unknown
 release: Unassigned
@@ -851,7 +892,7 @@ id: PM-0001
 prefix: PM
 number: 0001
 title: Wrong name
-status: New
+status: Backlog
 priority: Medium
 effort: Unknown
 release: Unassigned
@@ -943,8 +984,8 @@ await runTest('assignItemsToRelease creates release file and assigns items', asy
   assert.ok(fs.existsSync(path.join(projectPath, 'releases', 'v0.1.0.md')));
   const backlog = await readBacklogItems(projectPath);
   assert.equal(backlog.items.find((item) => item.id === 'PM-0000').release, 'v0.1.0');
-  assert.equal(backlog.items.find((item) => item.id === 'PM-0000').status, 'Planned');
-  assert.equal(backlog.items.find((item) => item.id === 'TEST-0001').status, 'Planned');
+  assert.equal(backlog.items.find((item) => item.id === 'PM-0000').status, 'Ready');
+  assert.equal(backlog.items.find((item) => item.id === 'TEST-0001').status, 'Ready');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -961,39 +1002,39 @@ await runTest('assignItemsToRelease adds item IDs without duplication', async ()
 await runTest('assignItemsToRelease does not downgrade advanced statuses', async () => {
   const { dir, projectPath } = makeProjectFixture();
   await createBacklogItem({ prefix: 'PM', title: 'Advanced', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
-  await updateBacklogItem('PM-0000', { title: 'Advanced', status: 'In Development', priority: 'Medium', effort: 'Unknown', release: 'Unassigned' }, projectPath);
+  await updateBacklogItem('PM-0000', { title: 'Advanced', status: 'In Progress', priority: 'Medium', effort: 'Unknown', release: 'Unassigned' }, projectPath);
   await assignItemsToRelease({ release: 'v0.1.0', itemIds: ['PM-0000'] }, projectPath);
   const item = (await readBacklogItems(projectPath)).items.find((candidate) => candidate.id === 'PM-0000');
-  assert.equal(item.status, 'In Development');
+  assert.equal(item.status, 'In Progress');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await runTest('assignItemsToRelease rejects Deployed items', async () => {
+await runTest('assignItemsToRelease rejects Done items', async () => {
   const { dir, projectPath } = makeProjectFixture();
   await createBacklogItem({ prefix: 'PM', title: 'Deployed item', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
-  await updateBacklogItem('PM-0000', { title: 'Deployed item', status: 'Deployed', priority: 'Medium', effort: 'Unknown', release: 'Unassigned' }, projectPath);
+  await updateBacklogItem('PM-0000', { title: 'Deployed item', status: 'Done', priority: 'Medium', effort: 'Unknown', release: 'Unassigned' }, projectPath);
   const result = await assignItemsToRelease({ release: 'v0.1.0', itemIds: ['PM-0000'] }, projectPath);
   assert.equal(result.statusCode, 400);
-  assert.ok(result.error.includes('Deployed items cannot be reassigned'));
+  assert.ok(result.error.includes('Done items cannot be reassigned'));
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await runTest('assignItemsToRelease warns for Clarifying items', async () => {
+await runTest('assignItemsToRelease warns for Backlog items', async () => {
   const { dir, projectPath } = makeProjectFixture();
   await createBacklogItem({ prefix: 'PM', title: 'Clarify item', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
-  await updateBacklogItem('PM-0000', { title: 'Clarify item', status: 'Clarifying', priority: 'Medium', effort: 'Unknown', release: 'Unassigned' }, projectPath);
+  await updateBacklogItem('PM-0000', { title: 'Clarify item', status: 'Backlog', priority: 'Medium', effort: 'Unknown', release: 'Unassigned' }, projectPath);
   const result = await assignItemsToRelease({ release: 'v0.1.0', itemIds: ['PM-0000'] }, projectPath);
-  assert.ok(result.warnings.some((warning) => warning.includes('Clarifying')));
+  assert.ok(result.warnings.some((warning) => warning.includes('Backlog')));
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
 await runTest('getReleasePlanner computes release readiness summary', async () => {
   const { dir, projectPath } = makeProjectFixture();
   await createBacklogItem({ prefix: 'PM', title: 'Ready item', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
-  await updateBacklogItem('PM-0000', { title: 'Ready item', status: 'Ready to Deploy', priority: 'Medium', effort: 'Unknown', release: 'v0.1.0' }, projectPath);
+  await updateBacklogItem('PM-0000', { title: 'Ready item', status: 'Ready to Release', priority: 'Medium', effort: 'Unknown', release: 'v0.1.0' }, projectPath);
   await assignItemsToRelease({ release: 'v0.1.0', itemIds: ['PM-0000'] }, projectPath);
   const planner = await getReleasePlanner(projectPath);
-  assert.equal(planner.releases.find((release) => release.id === 'v0.1.0').readiness, 'Ready to Deploy');
+  assert.equal(planner.releases.find((release) => release.id === 'v0.1.0').readiness, 'Ready to Release');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1062,6 +1103,78 @@ await runTest('POST /api/releases creates a release file', async () => {
   assert.ok(fs.existsSync(path.join(projectPath, 'releases', 'v0.4.0.md')));
 
   await new Promise((resolve) => server.close(resolve));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('updateReleaseMetadata stamps release lifecycle dates once', async () => {
+  const { dir, projectPath } = makeProjectFixture();
+  await createRelease('v0.4.0', projectPath);
+
+  const active = await updateReleaseMetadata('v0.4.0', { status: 'Active' }, projectPath);
+  const testing = await updateReleaseMetadata('v0.4.0', { status: 'Testing' }, projectPath);
+  const released = await updateReleaseMetadata('v0.4.0', { status: 'Released' }, projectPath);
+
+  assert.match(active.release.developed, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(testing.release.developed, active.release.developed);
+  assert.match(testing.release.tested, /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(released.release.deployed, /^\d{4}-\d{2}-\d{2}$/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('searchBacklogItems returns body matches with excerpts', async () => {
+  const { dir, projectPath } = makeProjectFixture();
+  await createBacklogItem({ prefix: 'PM', title: 'Search item', summary: 'Rare phrase lives here.', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
+
+  const result = await searchBacklogItems('rare phrase', projectPath);
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].id, 'PM-0000');
+  assert.ok(result.items[0].excerpt.toLowerCase().includes('rare phrase'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('saved views persist under project metadata', async () => {
+  const { dir, projectPath } = makeProjectFixture();
+
+  await saveSavedViews(projectPath, [{ id: 'view-1', name: 'Ready work', filters: { status: 'Ready' } }]);
+  const views = await getSavedViews(projectPath);
+
+  assert.equal(views.length, 1);
+  assert.equal(views[0].name, 'Ready work');
+  assert.equal(views[0].filters.status, 'Ready');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('validateBacklog flags invalid tags and missing dependency references', async () => {
+  const { dir, projectPath } = makeProjectFixture();
+  await createBacklogItem({ prefix: 'PM', title: 'Tagged dependency item', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
+  await updateBacklogItem('PM-0000', {
+    title: 'Tagged dependency item',
+    status: 'Backlog',
+    priority: 'Medium',
+    effort: 'Unknown',
+    release: 'Unassigned',
+    tags: ['bad tag'],
+    blocked_by: ['PM-9999'],
+  }, projectPath);
+
+  const result = await validateBacklog(projectPath, { updateMeta: false });
+
+  assert.ok(result.findings.some((finding) => finding.message.includes('Invalid tag value')));
+  assert.ok(result.findings.some((finding) => finding.message.includes('references missing dependency PM-9999')));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+await runTest('fixValidationFinding regenerates the BACKLOG index', async () => {
+  const { dir, projectPath } = makeProjectFixture();
+  await createBacklogItem({ prefix: 'PM', title: 'Index fix item', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
+  fs.writeFileSync(path.join(projectPath, 'BACKLOG.md'), '# stale\n', 'utf8');
+
+  const result = await fixValidationFinding(projectPath, { action: 'regenerate-index' });
+  const index = fs.readFileSync(path.join(projectPath, 'BACKLOG.md'), 'utf8');
+
+  assert.equal(result.fixed, true);
+  assert.ok(index.includes('PM-0000'));
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1172,8 +1285,8 @@ await runTest('getPromotionRecommendations includes only deploy-ready item statu
   await createBacklogItem({ prefix: 'PM', title: 'Ready deploy', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
   await createBacklogItem({ prefix: 'BUG', title: 'Passed testing', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
   await createBacklogItem({ prefix: 'FEAT', title: 'Not ready', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
-  await updateBacklogItem('PM-0000', { title: 'Ready deploy', status: 'Ready to Deploy', priority: 'Medium', effort: 'Unknown', release: 'v0.1.0' }, projectPath);
-  await updateBacklogItem('BUG-0001', { title: 'Passed testing', status: 'Passed Testing', priority: 'Medium', effort: 'Unknown', release: 'v0.1.0' }, projectPath);
+  await updateBacklogItem('PM-0000', { title: 'Ready deploy', status: 'Ready to Release', priority: 'Medium', effort: 'Unknown', release: 'v0.1.0' }, projectPath);
+  await updateBacklogItem('BUG-0001', { title: 'Passed testing', status: 'Ready to Release', priority: 'Medium', effort: 'Unknown', release: 'v0.1.0' }, projectPath);
   const recommendations = await getPromotionRecommendations(projectPath);
   assert.deepEqual(recommendations.items.map((item) => item.id).sort(), ['BUG-0001', 'PM-0000']);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -1200,7 +1313,7 @@ await runTest('control manager mutating actions reject wrong typed confirmation'
 await runTest('control manager API exposes status, recommendations, package, and approval gate', async () => {
   const { dir, projectPath } = makeGitProjectFixture();
   await createBacklogItem({ prefix: 'PM', title: 'Ready API', summary: 'S', problemNeed: 'N', expectedOutcome: 'O', acceptanceCriteria: 'A' }, projectPath);
-  await updateBacklogItem('PM-0000', { title: 'Ready API', status: 'Ready to Deploy', priority: 'Medium', effort: 'Unknown', release: 'v0.9.0' }, projectPath);
+  await updateBacklogItem('PM-0000', { title: 'Ready API', status: 'Ready to Release', priority: 'Medium', effort: 'Unknown', release: 'v0.9.0' }, projectPath);
   const server = createServer({ config: { projectPath, projectLabel: '', recentProjects: [] } });
   await new Promise((resolve) => server.listen(0, resolve));
   const { port } = server.address();
@@ -1248,7 +1361,7 @@ await runTest('getReleasePlanner exposes release details and included item title
   assert.equal(release.items[0].title, 'Release detail item');
   assert.equal(release.items[0].priority, 'Medium');
   assert.equal(release.items[0].path, 'backlog/active/PM-0000-release-detail-item.md');
-  assert.equal(release.statusCounts.Planned, 1);
+  assert.equal(release.statusCounts.Ready, 1);
   assert.equal(release.promptStatus.codexPromptGenerated, false);
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -1276,6 +1389,8 @@ await runTest('UI static files expose combined Backlog Dashboard workspace and n
   assert.ok(html.includes('ctx-completed'));
   assert.ok(html.includes('data-view-target="backlog"'));
   assert.ok(html.includes('data-view-target="releases"'));
+  assert.ok(html.includes('data-view-target="sprints"'));
+  assert.ok(html.includes('data-view-target="roadmap"'));
   assert.ok(html.includes('data-view-target="validation"'));
   assert.ok(html.includes('data-view-target="prompts"'));
   assert.ok(html.includes('data-view-target="settings"'));
@@ -1314,6 +1429,20 @@ await runTest('UI static files expose combined Backlog Dashboard workspace and n
   assert.ok(html.includes('bulkPriorityBtn'));
   assert.ok(html.includes('bulkStatusBtn'));
   assert.ok(html.includes('bulkReleaseBtn'));
+  assert.ok(html.includes('fullTextSearchToggle'));
+  assert.ok(html.includes('tagFilter'));
+  assert.ok(html.includes('saveViewBtn'));
+  assert.ok(html.includes('exportCsvBtn'));
+  assert.ok(html.includes('themeToggleBtn'));
+  assert.ok(html.includes('sprintBoard'));
+  assert.ok(html.includes('roadmapBoard'));
+  assert.ok(js.includes('/api/backlog/search'));
+  assert.ok(js.includes('/api/saved-views'));
+  assert.ok(js.includes('Keyboard Shortcuts'));
+  assert.ok(js.includes('quickAddForm'));
+  assert.ok(js.includes('data-validation-fix'));
+  assert.ok(js.includes('release-progress'));
+  assert.ok(js.includes('data-sprint-assign'));
   assert.ok(js.includes('settingsColor'));
   assert.ok(js.includes('browseProjectBtn'));
   assert.ok(js.includes('Browse'));
@@ -1342,7 +1471,7 @@ await runTest('readBacklogItems reads markdown files from all backlog folders', 
   fs.writeFileSync(path.join(projectPath, 'backlog', 'active', 'TEST-0001-sample.md'), `---
 id: TEST-0001
 title: Active sample
-status: New
+status: Backlog
 priority: Medium
 effort: Unknown
 release: Unassigned
@@ -1352,7 +1481,7 @@ updated: 2026-04-28
   fs.writeFileSync(path.join(projectPath, 'backlog', 'completed', 'BUG-0002-sample.md'), `---
 id: BUG-0002
 title: Completed sample
-status: Deployed
+status: Done
 priority: High
 effort: S
 release: v0.1.0
@@ -1583,7 +1712,7 @@ id: PM-0001
 prefix: PM
 number: 0001
 title: Keep
-status: New
+status: Backlog
 priority: Medium
 effort: Unknown
 release: Unassigned

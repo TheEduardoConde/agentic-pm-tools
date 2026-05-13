@@ -4,19 +4,19 @@ type: Bug
 prefix: BUG
 number: 0004
 title: Prompt Workspace generate button has no loading or error state
-status: Ready for Testing
+status: Needs Validation
 priority: Low
 effort: XS
 release: v0.3.0
 created: 2026-04-29
 developed: 2026-04-29
 updated: 2026-04-29
-tested: 
-deployed: 
-archived: 
-archive_reason: 
-deferred: 
-defer_reason: 
+tested:
+deployed:
+archived:
+archive_reason:
+deferred:
+defer_reason:
 ---
 
 # BUG-0004: Prompt Workspace generate button has no loading or error state
@@ -54,22 +54,17 @@ The Generate button shows a loading indicator while the request is in flight, di
 
 ## Edge Cases
 
-
-
 ## Implementation Notes
 
-Prompt workspace generation now disables the active Generate/Save button while pending and changes the button text to `Generating...` or `Saving...`. Prompt and checklist generation catch network/API failures and render the error detail in the prompt output area before re-enabling controls.
-
+Implemented in the large backlog delivery pass on 2026-05-06. The pass added status workflow acceleration, quick add, keyboard shortcuts, validation safe fixes, full-text search, dependency/tag/sprint metadata, activity notes, release progress and effort summaries, CSV export, roadmap and sprint views, and dark mode support as applicable to this item.
 
 ## Testing Notes
 
-Simulate a server error by temporarily returning a 500 from `POST /api/prompts/generate` and confirm the error is surfaced in the UI.
-
-Static UI coverage verifies the loading-state text is present. Existing prompt generation tests continue to pass.
+Automated validation: npm test from app/ passed after implementation. Human testing is still required for user-facing workflow confirmation.
 
 ## Human Testing Plan
 
-Open the Prompt Workspace, select a prompt type and item, click Generate, confirm a loading state is visible, and confirm the output appears (or an error message if the call fails).
+Human tester should exercise the item acceptance criteria in the running app, including the affected UI workflow and any file updates on disk. Record pass/fail results before deployment.
 
 ## Owner Review Needed
 
@@ -77,12 +72,14 @@ Open the Prompt Workspace, select a prompt type and item, click Generate, confir
 
 ## Codex Prompt
 
-
-
 ## Changed Files
 
-- app/src/app.js
-- app/test/readBacklog.test.js
+- `app/server.js`
+- `app/index.html`
+- `app/src/app.js`
+- `app/src/styles.css`
+- `app/test/readBacklog.test.js`
+- `docs/project/TEST_COMMANDS.md`
 
 ## Links
 

@@ -32,7 +32,7 @@ For broad or multi-part requests, propose a card split and wait for approval bef
 - Preserve approved scope.
 - Validate acceptance criteria.
 - Check `docs/project/TEST_COMMANDS.md` before running tests.
-- Record evidence for tests run or explain skipped tests.
+- Provide the automated test plan, automated test results, and skipped-test explanations in the completion report.
+- Provide a human testing plan automatically for implementation work, unless human testing is not applicable and the reason is stated.
 - Update project backlog or release files only when the task calls for it.
 - Finish with a concise completion report for implementation or version-control preparation work.
-

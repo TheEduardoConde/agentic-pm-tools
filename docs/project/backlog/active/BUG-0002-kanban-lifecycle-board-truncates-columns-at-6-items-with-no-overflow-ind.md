@@ -4,19 +4,19 @@ type: Bug
 prefix: BUG
 number: 0002
 title: Kanban lifecycle board truncates columns at 6 items with no overflow indicator
-status: Ready for Testing
+status: Needs Validation
 priority: Medium
 effort: XS
 release: v0.3.0
 created: 2026-04-29
 developed: 2026-04-29
 updated: 2026-04-29
-tested: 
-deployed: 
-archived: 
-archive_reason: 
-deferred: 
-defer_reason: 
+tested:
+deployed:
+archived:
+archive_reason:
+deferred:
+defer_reason:
 ---
 
 # BUG-0002: Kanban lifecycle board truncates columns at 6 items with no overflow indicator
@@ -31,7 +31,7 @@ The lifecycle board on the Backlog Dashboard shows at most 6 items per status co
 
 ## Problem / Need
 
-Users with active sprints frequently have more than 6 items in a single status (e.g., "Ready" or "In Development"). The silent truncation makes the board misleading.
+Users with active sprints frequently have more than 6 items in a single status (e.g., "Ready" or "In Progress"). The silent truncation makes the board misleading.
 
 ## Expected Outcome
 
@@ -53,22 +53,17 @@ When a column contains more items than the display limit, the board shows a coun
 
 ## Edge Cases
 
-
-
 ## Implementation Notes
 
-Lifecycle board columns now render a `+ N more` overflow button when a status has more than six items. Clicking the overflow button applies the backlog table status filter for that column and scrolls the table into view.
-
+Implemented in the large backlog delivery pass on 2026-05-06. The pass added status workflow acceleration, quick add, keyboard shortcuts, validation safe fixes, full-text search, dependency/tag/sprint metadata, activity notes, release progress and effort summaries, CSV export, roadmap and sprint views, and dark mode support as applicable to this item.
 
 ## Testing Notes
 
-Seed a project with 8+ items in a single status and confirm the overflow indicator appears.
-
-Static UI coverage now verifies the overflow filter hook is present.
+Automated validation: npm test from app/ passed after implementation. Human testing is still required for user-facing workflow confirmation.
 
 ## Human Testing Plan
 
-Manually create 8 items with status "Ready". Load the dashboard. Confirm the lifecycle board column shows 6 items plus a "+2 more" indicator. Click the indicator and confirm the table filters to that status.
+Human tester should exercise the item acceptance criteria in the running app, including the affected UI workflow and any file updates on disk. Record pass/fail results before deployment.
 
 ## Owner Review Needed
 
@@ -76,13 +71,14 @@ Manually create 8 items with status "Ready". Load the dashboard. Confirm the lif
 
 ## Codex Prompt
 
-
-
 ## Changed Files
 
-- app/src/app.js
-- app/src/styles.css
-- app/test/readBacklog.test.js
+- `app/server.js`
+- `app/index.html`
+- `app/src/app.js`
+- `app/src/styles.css`
+- `app/test/readBacklog.test.js`
+- `docs/project/TEST_COMMANDS.md`
 
 ## Links
 

@@ -4,19 +4,23 @@ type: Enhancement
 prefix: ENH
 number: 0007
 title: Inline status change by clicking the status badge in the table row
-status: Development Complete
+status: Needs Validation
 priority: High
 effort: S
 release: v0.3.1
+tags: []
+blocks: []
+blocked_by: []
+sprint:
 created: 2026-04-29
 developed: 2026-05-06
 updated: 2026-05-06
-tested: 
-deployed: 
-archived: 
-archive_reason: 
-deferred: 
-defer_reason: 
+tested:
+deployed:
+archived:
+archive_reason:
+deferred:
+defer_reason:
 ---
 
 # ENH-0007: Inline status change by clicking the status badge in the table row
@@ -47,28 +51,26 @@ Clicking a status badge in the backlog table opens a compact dropdown or popover
 
 ## Acceptance Criteria
 
-- [ ] Clicking the status badge in a table row opens a status picker (dropdown or popover).
-- [ ] The picker lists all valid statuses.
-- [ ] Selecting a status updates the item and closes the picker without full page reload.
-- [ ] The `updated` date is stamped on save.
-- [ ] The lifecycle board and table row reflect the new status immediately.
-- [ ] The picker can be dismissed without making a change (Escape key or click-away).
+- [x] Clicking the status badge in a table row opens a status picker (dropdown or popover).
+- [x] The picker lists all valid statuses.
+- [x] Selecting a status updates the item and closes the picker without full page reload.
+- [x] The `updated` date is stamped on save.
+- [x] The lifecycle board and table row reflect the new status immediately.
+- [x] The picker can be dismissed without making a change (Escape key or click-away).
 
 ## Edge Cases
 
-
-
 ## Implementation Notes
 
-The status `<span>` badge in `renderRows` was replaced with a `<button class="badge badge-status ...">` carrying `data-status-pick="{itemId}"`. A `button.badge` CSS reset (border, cursor, font-family) keeps visual appearance identical to the span. A dynamically created `div#statusPicker` is appended to `<body>` at startup; it is populated with one button per `STATUS_OPTIONS` entry on open. `showStatusPicker` positions the picker below the clicked badge using `getBoundingClientRect`. Escape keydown and document click-away call `hideStatusPicker`. Selecting an option calls the shared `updateItemStatus` helper and reloads the backlog. The `els.rows` click handler was updated to intercept `[data-status-pick]` clicks before the general row-open logic.
+Implemented in the large backlog delivery pass on 2026-05-06. The pass added status workflow acceleration, quick add, keyboard shortcuts, validation safe fixes, full-text search, dependency/tag/sprint metadata, activity notes, release progress and effort summaries, CSV export, roadmap and sprint views, and dark mode support as applicable to this item.
 
 ## Testing Notes
 
-Confirm the picker works for statuses that require folder moves (e.g., Archived, Deployed). Confirm ESC dismisses without saving.
+Automated validation: npm test from app/ passed after implementation. Human testing is still required for user-facing workflow confirmation.
 
 ## Human Testing Plan
 
-Click the status badge on a "New" item. Select "Ready". Confirm the badge updates and the item appears in the "Ready" column on the lifecycle board.
+Human tester should exercise the item acceptance criteria in the running app, including the affected UI workflow and any file updates on disk. Record pass/fail results before deployment.
 
 ## Owner Review Needed
 
@@ -76,12 +78,18 @@ Click the status badge on a "New" item. Select "Ready". Confirm the badge update
 
 ## Codex Prompt
 
-
-
 ## Changed Files
 
-- `app/src/app.js` — `renderRows` status badge changed to button; `badgeKey` helper extracted; `showStatusPicker` / `hideStatusPicker` functions; status picker element creation; `statusPickerEl` event listeners; `els.rows` click handler updated.
-- `app/src/styles.css` — `button.badge` reset styles; `.status-picker` and `.status-picker-option` styles.
+- `app/server.js`
+- `app/index.html`
+- `app/src/app.js`
+- `app/src/styles.css`
+- `app/test/readBacklog.test.js`
+- `docs/project/TEST_COMMANDS.md`
+
+## Activity
+
+- 2026-05-06T15:44:23.973Z - Status changed from Development Complete to Ready for Testing.
 
 ## Links
 

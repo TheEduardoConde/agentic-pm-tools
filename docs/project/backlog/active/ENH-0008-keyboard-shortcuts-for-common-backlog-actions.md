@@ -1,12 +1,12 @@
 ---
-id: FEAT-0018
-type: Feature
-prefix: FEAT
-number: 0018
-title: Effort sizing summary per release
+id: ENH-0008
+type: Enhancement
+prefix: ENH
+number: 0008
+title: Keyboard shortcuts for common backlog actions
 status: Needs Validation
 priority: Medium
-effort: S
+effort: M
 release: Unassigned
 tags: []
 blocks: []
@@ -23,7 +23,7 @@ deferred:
 defer_reason:
 ---
 
-# FEAT-0018: Effort sizing summary per release
+# ENH-0008: Keyboard shortcuts for common backlog actions
 
 ## User Story
 
@@ -31,15 +31,15 @@ defer_reason:
 
 ## Summary
 
-Display a breakdown of effort sizes (XS, S, M, L, XL, Unknown) for the items included in a release, so planners can assess load at a glance without opening each item.
+Add keyboard shortcuts for the most common backlog operations so power users can navigate and triage without reaching for the mouse.
 
 ## Problem / Need
 
-Release planning currently requires opening individual items or the items table to see effort values. There is no summary showing whether a release is overloaded (too many L/XL items) or whether effort estimates are missing (Unknown). This is a standard capacity view in any sprint planner.
+The current UI is entirely pointer-driven. Triaging a backlog — opening items, changing status, navigating between rows — requires many clicks. JIRA and Linear both offer keyboard navigation as a core productivity feature.
 
 ## Expected Outcome
 
-The release detail panel shows a compact effort summary below or beside the progress bar. Each effort tier shows a count and optionally a simple icon or chip (XS ×3, S ×5, M ×2, L ×1, Unknown ×2).
+A defined set of keyboard shortcuts is available and discoverable via a help overlay (`?`). At minimum: navigate rows with arrow keys, open the focused item with `Enter` or `O`, change status with `S`, close modals with `Escape`.
 
 ## Functional Requirements
 
@@ -51,10 +51,12 @@ The release detail panel shows a compact effort summary below or beside the prog
 
 ## Acceptance Criteria
 
-- [x] The release detail panel shows an effort breakdown for releases with at least one item.
-- [x] Each effort tier (XS, S, M, L, XL, Unknown) shows the count of included items with that effort.
-- [x] Tiers with zero items are either hidden or shown as 0.
-- [x] The breakdown updates when items are added/removed or their effort changes.
+- [x] Arrow keys move focus between rows in the backlog table.
+- [x] `Enter` or `O` opens the focused item's detail modal.
+- [x] `S` opens the inline status picker for the focused row.
+- [x] `Escape` closes any open modal or picker.
+- [x] `?` opens a keyboard shortcut help overlay listing all available shortcuts.
+- [x] Shortcuts do not fire when focus is inside a text input or textarea.
 
 ## Edge Cases
 
@@ -87,8 +89,8 @@ Human tester should exercise the item acceptance criteria in the running app, in
 
 ## Activity
 
-- 2026-05-06T15:44:24.628Z - Status changed from New to Development Complete.
-- 2026-05-06T15:44:24.654Z - Status changed from Development Complete to Ready for Testing.
+- 2026-05-06T15:44:23.996Z - Status changed from New to Development Complete.
+- 2026-05-06T15:44:24.033Z - Status changed from Development Complete to Ready for Testing.
 
 ## Links
 

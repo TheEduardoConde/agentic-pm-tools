@@ -1,0 +1,1 @@
+Read `docs/_methodology/STARTUP.md`. Then read `docs/project/CURRENT_STATE.md` and `docs/project/BACKLOG.md` to understand what's in progress. Summarize: current project state, any items in active work (In Progress, Needs Validation, Ready to Release), and ask what the user wants to work on today.

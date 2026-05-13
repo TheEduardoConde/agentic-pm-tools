@@ -27,7 +27,7 @@ Describe the security-relevant change.
 
 ## Result
 
-- Pass / Needs Review / Blocked / Not Applicable
+- Pass / Review Required / Blocked / Not Applicable
 
 ## Follow-Up
 

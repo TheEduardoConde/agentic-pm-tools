@@ -3,7 +3,7 @@ id: FEAT-0001
 prefix: FEAT
 number: 0001
 title: Short title
-status: New
+status: Backlog
 priority: Medium
 effort: Unknown
 release: Unassigned

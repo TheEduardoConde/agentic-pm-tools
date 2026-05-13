@@ -13,6 +13,7 @@ const KNOWN_SECTION_ORDER = [
   'Codex Prompt',
   'Changed Files',
   'Owner Review Needed',
+  'Activity',
   'Archive Note',
   'Defer Note',
   'Links',
@@ -42,16 +43,15 @@ const TYPE_PREFIX_MAP = {
 const TYPE_OPTIONS = Object.keys(TYPE_PREFIX_MAP);
 const PREFIX_TYPE_MAP = Object.fromEntries(Object.entries(TYPE_PREFIX_MAP).map(([type, prefix]) => [prefix, type]));
 const STATUS_GROUPS = {
-  Intake: ['New', 'Clarifying'],
-  Planning: ['Ready', 'Planned'],
-  Build: ['In Development', 'Development Complete', 'Needs Review', 'Changes Requested'],
-  Test: ['Ready for Testing', 'In Testing', 'Failed Testing', 'Passed Testing'],
-  Release: ['Ready to Deploy', 'Deployed'],
-  Inactive: ['Blocked', 'Deferred', 'Rejected', 'Duplicate', 'Archived'],
+  Intake: ['Backlog', 'Ready'],
+  Build: ['In Progress'],
+  Validation: ['Needs Validation'],
+  Release: ['Ready to Release', 'Done'],
+  Paused: ['Blocked', 'Deferred', 'Archived'],
 };
-const STATUS_OPTIONS = ['New', 'Clarifying', 'Ready', 'Planned', 'In Development', 'Development Complete', 'Needs Review', 'Changes Requested', 'Ready for Testing', 'In Testing', 'Failed Testing', 'Passed Testing', 'Ready to Deploy', 'Deployed', 'Blocked', 'Deferred', 'Rejected', 'Duplicate', 'Archived'];
+const STATUS_OPTIONS = ['Backlog', 'Ready', 'In Progress', 'Needs Validation', 'Ready to Release', 'Done', 'Blocked', 'Deferred', 'Archived'];
 const NON_INACTIVE_STATUS_FILTER = '__non_inactive__';
-const INACTIVE_STATUSES = new Set(STATUS_GROUPS.Inactive);
+const INACTIVE_STATUSES = new Set(['Done', 'Deferred', 'Archived']);
 const PRIORITY_OPTIONS = ['Critical', 'High', 'Medium', 'Low', 'Someday', 'Parking Lot'];
 const EFFORT_OPTIONS = ['XS', 'S', 'M', 'L', 'XL', 'Unknown'];
 const FORM_FIELDS = [
@@ -82,8 +82,11 @@ const state = {
   projectPath: '',
   lastValidation: '',
   lastPrompt: { type: '', source: '', timestamp: '' },
-  filters: { search: '', type: '', status: NON_INACTIVE_STATUS_FILTER, priority: '', effort: '', release: '', folder: '', sort: 'updated', sortDir: 'desc' },
+  filters: { search: '', fullText: false, type: '', status: NON_INACTIVE_STATUS_FILTER, priority: '', effort: '', release: '', tag: '', folder: '', sort: 'updated', sortDir: 'desc' },
   config: { activeProjectId: '', activeProject: null, projects: [], projectPath: '', projectLabel: '', recentProjects: [] },
+  savedViews: [],
+  fullTextResults: [],
+  focusedRowId: '',
   editingProjectId: '',
   projectFormMode: '',
   projectForm: { label: '', path: '', color: '#253858' },
@@ -107,6 +110,7 @@ const PROJECT_COLORS = [
 const els = {
   refreshBtn: document.getElementById('refreshBtn'),
   addItemBtn: document.getElementById('addItemBtn'),
+  themeToggleBtn: document.getElementById('themeToggleBtn'),
   itemCount: document.getElementById('itemCount'),
   activeCount: document.getElementById('activeCount'),
   completedCount: document.getElementById('completedCount'),
@@ -137,8 +141,15 @@ const els = {
   priorityFilter: document.getElementById('priorityFilter'),
   effortFilter: document.getElementById('effortFilter'),
   releaseFilter: document.getElementById('releaseFilter'),
+  tagFilter: document.getElementById('tagFilter'),
   folderFilter: document.getElementById('folderFilter'),
   sortSelect: document.getElementById('sortSelect'),
+  fullTextSearchToggle: document.getElementById('fullTextSearchToggle'),
+  fullTextResults: document.getElementById('fullTextResults'),
+  saveViewBtn: document.getElementById('saveViewBtn'),
+  savedViewSelect: document.getElementById('savedViewSelect'),
+  renameViewBtn: document.getElementById('renameViewBtn'),
+  deleteViewBtn: document.getElementById('deleteViewBtn'),
   selectionCount: document.getElementById('selectionCount'),
   bulkReleaseInput: document.getElementById('bulkReleaseInput'),
   bulkReleaseBtn: document.getElementById('bulkReleaseBtn'),
@@ -147,6 +158,10 @@ const els = {
   bulkStatusSelect: document.getElementById('bulkStatusSelect'),
   bulkStatusBtn: document.getElementById('bulkStatusBtn'),
   goReleasesBtn: document.getElementById('goReleasesBtn'),
+  exportCsvBtn: document.getElementById('exportCsvBtn'),
+  sprintBoard: document.getElementById('sprintBoard'),
+  sprintCapacityInput: document.getElementById('sprintCapacityInput'),
+  roadmapBoard: document.getElementById('roadmapBoard'),
   validateBtn: document.getElementById('validateBtn'),
   validationReminder: document.getElementById('validationReminder'),
   lastValidation: document.getElementById('lastValidation'),
@@ -221,6 +236,16 @@ function sectionValue(item, title) {
   return item?.sections?.[title]?.content ?? '';
 }
 
+function listValue(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return String(value ?? '').split(/[\n,]+/).map((entry) => entry.trim()).filter(Boolean);
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
 function badgeKey(value) {
   return String(value || '').toLowerCase().replace(/[\s/]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
@@ -230,9 +255,16 @@ function badge(value, type) {
   return `<span class="badge badge-${type}${key ? ` bv-${key}` : ''}">${escapeHtml(value || '-')}</span>`;
 }
 
+function tagBadges(tags = []) {
+  const list = listValue(tags);
+  return list.length ? list.map((tag) => `<span class="tag-badge">${escapeHtml(tag)}</span>`).join('') : '<span class="muted-inline">None</span>';
+}
+
 function matchesSearch(item, query) {
   if (!query) return true;
-  return [item.id, item.title, item.status, item.priority, item.effort, item.release, item.updated, item.folder, item.fileName].join(' ').toLowerCase().includes(query.toLowerCase());
+  const fields = [item.id, item.title, item.status, item.priority, item.effort, item.release, item.updated, item.folder, item.fileName];
+  if (state.filters.fullText) fields.push(item.rawBody);
+  return fields.join(' ').toLowerCase().includes(query.toLowerCase());
 }
 
 function filteredItems() {
@@ -244,6 +276,7 @@ function filteredItems() {
     && (!state.filters.priority || item.priority === state.filters.priority)
     && (!state.filters.effort || item.effort === state.filters.effort)
     && (!state.filters.release || item.release === state.filters.release)
+    && (!state.filters.tag || listValue(item.tags).includes(state.filters.tag))
     && (!state.filters.folder || item.folder === state.filters.folder));
   const priorityRank = { Critical: 0, High: 1, Medium: 2, Low: 3, Someday: 4, 'Parking Lot': 5 };
   const dir = state.filters.sortDir === 'asc' ? 1 : -1;
@@ -318,18 +351,18 @@ function attentionItem(item) {
 }
 
 function renderAttentionPanels() {
-  const DONE_STATUSES = new Set(['Deployed', 'Archived', 'Rejected', 'Duplicate', 'Deferred']);
+  const DONE_STATUSES = new Set(['Done', 'Archived', 'Deferred']);
   const attention = state.items.filter((item) =>
     !DONE_STATUSES.has(item.status) && (
-      ['Blocked', 'Clarifying', 'Failed Testing'].includes(item.status) ||
+      item.status === 'Blocked' ||
       item.release === 'Unassigned'
     )
   ).slice(0, 8);
   els.needsAttention.innerHTML = attention.length ? attention.map(attentionItem).join('') : '<p class="muted">No priority attention items.</p>';
-  const readyTesting = state.items.filter((item) => item.status === 'Ready for Testing');
-  els.readyForTesting.innerHTML = readyTesting.length ? readyTesting.map(attentionItem).join('') : '<p class="muted">No items ready for human testing.</p>';
-  const readyDeploy = state.items.filter((item) => ['Ready to Deploy', 'Passed Testing'].includes(item.status));
-  els.readyToDeploy.innerHTML = readyDeploy.length ? readyDeploy.map(attentionItem).join('') : '<p class="muted">No items ready to deploy.</p>';
+  const needsValidation = state.items.filter((item) => item.status === 'Needs Validation');
+  els.readyForTesting.innerHTML = needsValidation.length ? needsValidation.map(attentionItem).join('') : '<p class="muted">No items need validation.</p>';
+  const readyRelease = state.items.filter((item) => item.status === 'Ready to Release');
+  els.readyToDeploy.innerHTML = readyRelease.length ? readyRelease.map(attentionItem).join('') : '<p class="muted">No items ready to release.</p>';
 
   const recent = [...state.items].sort((a, b) => (b.updated || '').localeCompare(a.updated || '')).slice(0, 8);
   els.recentActivity.innerHTML = recent.length ? recent.map(attentionItem).join('') : '<p class="muted">No recent items.</p>';
@@ -362,6 +395,20 @@ function highContrastTextColor(hexColor) {
   return luminance > 0.46 ? '#111827' : '#f8fafc';
 }
 
+function currentTheme() {
+  return localStorage.getItem('pmToolsTheme') || 'light';
+}
+
+function applyTheme(theme = currentTheme()) {
+  document.documentElement.dataset.theme = theme;
+  if (els.themeToggleBtn) els.themeToggleBtn.textContent = theme === 'dark' ? 'Light' : 'Dark';
+}
+
+function saveTheme(theme) {
+  localStorage.setItem('pmToolsTheme', theme);
+  applyTheme(theme);
+}
+
 function normalizeConfig(data = {}) {
   const projects = Array.isArray(data.projects) ? data.projects : [];
   const active = data.activeProject || projects.find((project) => project.id === data.activeProjectId) || null;
@@ -373,6 +420,38 @@ function normalizeConfig(data = {}) {
     projectLabel: data.projectLabel ?? active?.label ?? '',
     recentProjects: Array.isArray(data.recentProjects) ? data.recentProjects : [],
   };
+}
+
+function renderSavedViews() {
+  if (!els.savedViewSelect) return;
+  els.savedViewSelect.innerHTML = [
+    '<option value="">Saved views...</option>',
+    ...state.savedViews.map((view) => `<option value="${escapeHtml(view.id)}">${escapeHtml(view.name)}</option>`),
+  ].join('');
+}
+
+async function loadSavedViews() {
+  try {
+    const response = await fetch('/api/saved-views', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || `Saved view load failed with ${response.status}`);
+    state.savedViews = data.savedViews || [];
+    renderSavedViews();
+  } catch (error) {
+    showError(error.message || 'Failed to load saved views.');
+  }
+}
+
+async function persistSavedViews() {
+  const response = await fetch('/api/saved-views', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ savedViews: state.savedViews }),
+  });
+  const data = await response.json();
+  if (!response.ok || data.error) throw new Error(data.error || `Saved view save failed with ${response.status}`);
+  state.savedViews = data.savedViews || [];
+  renderSavedViews();
 }
 
 function renderProjectSelector() {
@@ -558,7 +637,7 @@ function renderControlManager() {
           <strong>${escapeHtml(release)}</strong>
           <ul>${items.map((item) => `<li><span class="mono">${escapeHtml(item.id)}</span> ${escapeHtml(item.title)} ${badge(item.status, 'status')}</li>`).join('')}</ul>
         </div>
-      `).join('') : '<p class="muted">No items are Ready to Deploy or Passed Testing.</p>'}
+      `).join('') : '<p class="muted">No items are Ready to Release.</p>'}
     </section>
     <section class="control-section">
       <h3>Changed Files</h3>
@@ -837,21 +916,94 @@ function renderDashboard() {
   const open = state.items.filter((item) => item.folder !== 'completed' && item.folder !== 'archived');
   els.itemCount.textContent = String(state.items.length);
   els.activeCount.textContent = String(state.items.filter((item) => item.folder === 'active').length);
-  els.completedCount.textContent = String(state.items.filter((item) => item.status === 'Deployed').length);
+  els.completedCount.textContent = String(state.items.filter((item) => item.status === 'Done').length);
   if (els.blockedCount) els.blockedCount.textContent = String(state.items.filter((item) => item.status === 'Blocked').length);
-  if (els.clarifyingCount) els.clarifyingCount.textContent = String(state.items.filter((item) => item.status === 'Clarifying').length);
-  if (els.deployReadyCount) els.deployReadyCount.textContent = String(state.items.filter((item) => ['Ready', 'Ready to Deploy', 'Passed Testing'].includes(item.status)).length);
-  els.newCount.textContent = String(state.items.filter((item) => item.status === 'New').length);
-  els.developmentCount.textContent = String(state.items.filter((item) => item.status === 'In Development').length);
-  if (els.readyTestingCount) els.readyTestingCount.textContent = String(state.items.filter((item) => item.status === 'Ready for Testing').length);
-  els.passedTestingCount.textContent = String(state.items.filter((item) => item.status === 'Passed Testing').length);
+  if (els.clarifyingCount) els.clarifyingCount.textContent = String(state.items.filter((item) => item.status === 'Backlog').length);
+  if (els.deployReadyCount) els.deployReadyCount.textContent = String(state.items.filter((item) => ['Ready', 'Ready to Release'].includes(item.status)).length);
+  els.newCount.textContent = String(state.items.filter((item) => item.status === 'Backlog').length);
+  els.developmentCount.textContent = String(state.items.filter((item) => item.status === 'In Progress').length);
+  if (els.readyTestingCount) els.readyTestingCount.textContent = String(state.items.filter((item) => item.status === 'Needs Validation').length);
+  els.passedTestingCount.textContent = String(state.items.filter((item) => item.status === 'Ready to Release').length);
   if (els.prioritySummary) renderPills(els.prioritySummary, countBy(open, 'priority'));
   if (els.statusSummary) renderGroupedStatusPills(els.statusSummary, countBy(open, 'status'));
   if (els.typeSummary) renderPills(els.typeSummary, countByType(open));
   if (els.releaseSummary) renderPills(els.releaseSummary, state.releases.length ? Object.fromEntries(state.releases.map((release) => [release.id, release.itemCount])) : {});
   renderBoard();
   renderAttentionPanels();
+  renderSprintBoard();
+  renderRoadmap();
   renderSettings();
+}
+
+const EFFORT_POINTS = { XS: 0.5, S: 1, M: 2, L: 3, XL: 5, Unknown: 0 };
+const PRIORITY_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3, Someday: 4, 'Parking Lot': 5 };
+
+function renderSprintBoard() {
+  if (!els.sprintBoard) return;
+  const capacity = Number(els.sprintCapacityInput?.value || 10);
+  const groups = new Map();
+  for (const item of state.items) {
+    const sprint = item.sprint || 'Backlog';
+    if (!groups.has(sprint)) groups.set(sprint, []);
+    groups.get(sprint).push(item);
+  }
+  const ordered = [...groups.entries()].sort(([a], [b]) => (a === 'Backlog' ? 1 : b === 'Backlog' ? -1 : a.localeCompare(b)));
+  els.sprintBoard.innerHTML = ordered.map(([sprint, items]) => {
+    const points = items.reduce((sum, item) => sum + (EFFORT_POINTS[item.effort] ?? 0), 0);
+    return `
+      <section class="planning-column">
+        <header><h3>${escapeHtml(sprint)}</h3><span>${points}/${capacity} pts</span></header>
+        <div class="planning-items">
+          ${items.map((item) => `
+            <article class="planning-item">
+              <button type="button" class="link-button" data-open-item="${escapeHtml(item.id)}">${escapeHtml(item.id)} ${escapeHtml(item.title)}</button>
+              <select data-sprint-assign="${escapeHtml(item.id)}">
+                ${['Backlog', 'Sprint 1', 'Sprint 2', 'Sprint 3'].map((option) => `<option value="${option === 'Backlog' ? '' : escapeHtml(option)}"${(item.sprint || '') === (option === 'Backlog' ? '' : option) ? ' selected' : ''}>${escapeHtml(option)}</option>`).join('')}
+              </select>
+            </article>
+          `).join('')}
+        </div>
+      </section>
+    `;
+  }).join('') || '<p class="muted">No backlog items available for sprint planning.</p>';
+}
+
+function releaseSortKey(value) {
+  const match = String(value || '').match(/^v(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) return [9999, 9999, 9999, value || ''];
+  return match.slice(1).map(Number);
+}
+
+function compareReleaseLabels(a, b) {
+  const ak = releaseSortKey(a);
+  const bk = releaseSortKey(b);
+  for (let i = 0; i < 3; i++) {
+    if (ak[i] !== bk[i]) return ak[i] - bk[i];
+  }
+  return String(ak[3] || '').localeCompare(String(bk[3] || ''));
+}
+
+function renderRoadmap() {
+  if (!els.roadmapBoard) return;
+  const releases = [...new Set(state.items.map((item) => item.release || 'Unassigned'))]
+    .sort((a, b) => (a === 'Unassigned' ? 1 : b === 'Unassigned' ? -1 : compareReleaseLabels(a, b)));
+  els.roadmapBoard.innerHTML = releases.map((release) => {
+    const items = state.items
+      .filter((item) => (item.release || 'Unassigned') === release)
+      .sort((a, b) => (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) || a.id.localeCompare(b.id));
+    return `
+      <section class="roadmap-column">
+        <header><h3>${escapeHtml(release)}</h3><span>${items.length} item(s)</span></header>
+        ${items.map((item) => `
+          <button type="button" class="roadmap-item" data-open-item="${escapeHtml(item.id)}">
+            <strong>${escapeHtml(item.id)}</strong>
+            <span>${escapeHtml(item.title)}</span>
+            <em>${escapeHtml(item.priority)} / ${escapeHtml(item.status)}</em>
+          </button>
+        `).join('') || '<p class="muted">No items.</p>'}
+      </section>
+    `;
+  }).join('');
 }
 
 function renderBoard() {
@@ -894,11 +1046,11 @@ function renderRows() {
   const items = filteredItems();
   els.visibleCount.textContent = `${items.length} shown`;
   if (!items.length) {
-    els.rows.innerHTML = '<tr><td colspan="11" class="empty">No backlog items match the current filters.</td></tr>';
+    els.rows.innerHTML = `${quickAddRow()}<tr><td colspan="12" class="empty">No backlog items match the current filters.</td></tr>`;
     return;
   }
-  els.rows.innerHTML = items.map((item) => `
-    <tr class="${item.id === state.selectedId ? 'selected' : ''}" data-item-id="${escapeHtml(item.id)}">
+  els.rows.innerHTML = quickAddRow() + items.map((item) => `
+    <tr class="${item.id === state.selectedId ? 'selected' : ''}${item.id === state.focusedRowId ? ' focused-row' : ''}" data-item-id="${escapeHtml(item.id)}">
       <td><input type="checkbox" class="row-select" data-select-id="${escapeHtml(item.id)}"${state.selectedIds.has(item.id) ? ' checked' : ''}></td>
       <td class="mono">${escapeHtml(item.id || '-')}</td>
       <td>${badge(itemType(item), 'type')}</td>
@@ -909,10 +1061,25 @@ function renderRows() {
       <td>${escapeHtml(item.release || '-')}</td>
       <td>${escapeHtml(item.updated || '-')}</td>
       <td>${badge(item.folder, 'folder')}</td>
+      <td><div class="tag-list">${tagBadges(item.tags)}</div></td>
       <td><button type="button" class="secondary small-button" data-open-item="${escapeHtml(item.id)}">View</button></td>
     </tr>
   `).join('');
   els.selectionCount.textContent = `${state.selectedIds.size} selected`;
+}
+
+function quickAddRow() {
+  return `
+    <tr class="quick-add-row">
+      <td colspan="12">
+        <form id="quickAddForm" class="quick-add-form">
+          <select name="type" aria-label="Type">${optionList(TYPE_OPTIONS, 'Feature')}</select>
+          <input name="title" type="text" placeholder="Quick add backlog item title">
+          <button type="submit" class="secondary small-button">Add</button>
+        </form>
+      </td>
+    </tr>
+  `;
 }
 
 function renderFilters() {
@@ -921,6 +1088,7 @@ function renderFilters() {
   populateFilter(els.priorityFilter, uniqueValues(state.items, 'priority'), state.filters.priority, 'All priorities');
   populateFilter(els.effortFilter, uniqueValues(state.items, 'effort'), state.filters.effort, 'All efforts');
   populateFilter(els.releaseFilter, uniqueValues(state.items, 'release'), state.filters.release, 'All releases');
+  populateFilter(els.tagFilter, [...new Set(state.items.flatMap((item) => listValue(item.tags)))].sort((a, b) => a.localeCompare(b)), state.filters.tag, 'All tags');
   populateFilter(els.folderFilter, uniqueValues(state.items, 'folder'), state.filters.folder, 'All folders');
   populateFilter(els.bulkPrioritySelect, PRIORITY_OPTIONS, els.bulkPrioritySelect?.value || '', 'Priority...');
   populateFilter(els.bulkStatusSelect, STATUS_OPTIONS, els.bulkStatusSelect?.value || '', 'Status...');
@@ -938,13 +1106,29 @@ function inputField(name, label, value, readonly = false, rows = 1) {
   return `<label>${escapeHtml(label)}<input name="${escapeHtml(name)}" type="text" value="${escapeHtml(value)}"${attr}></label>`;
 }
 
+function linkedItemsHtml(ids = []) {
+  const list = listValue(ids);
+  if (!list.length) return '<span class="muted-inline">None</span>';
+  return list.map((id) => {
+    const item = state.items.find((candidate) => candidate.id === id);
+    return item
+      ? `<button type="button" class="dependency-link" data-open-item="${escapeHtml(id)}">${escapeHtml(id)} ${badge(item.status, 'status')}</button>`
+      : `<span class="dependency-link missing">${escapeHtml(id)} Missing</span>`;
+  }).join('');
+}
+
+function activityHtml(item) {
+  const content = sectionValue(item, 'Activity');
+  return content.trim() ? `<pre class="activity-log">${escapeHtml(content)}</pre>` : '<p class="muted">No activity yet.</p>';
+}
+
 function renderItemForm(mode, item = {}) {
   const isCreate = mode === 'create';
   const isView = mode === 'view';
   const title = isCreate ? 'Create Backlog Item' : isView ? 'View Backlog Item' : 'Edit Backlog Item';
   const prefix = item.prefix || 'FEAT';
   const type = item.type || typeFromPrefix(prefix);
-  const status = item.status || 'New';
+  const status = item.status || 'Backlog';
   const priority = item.priority || 'Medium';
   const effort = item.effort || 'Unknown';
   return `
@@ -965,6 +1149,10 @@ function renderItemForm(mode, item = {}) {
         <label>Priority<select name="priority"${isView ? ' disabled' : ''}>${optionList(PRIORITY_OPTIONS, priority)}</select></label>
         <label>Effort<select name="effort"${isView ? ' disabled' : ''}>${optionList(EFFORT_OPTIONS, effort)}</select></label>
         ${inputField('release', 'Release', item.release || 'Unassigned', isView)}
+        ${inputField('sprint', 'Sprint', item.sprint || '', isView)}
+        ${inputField('tags', 'Tags', listValue(item.tags).join(', '), isView)}
+        ${inputField('blocks', 'Blocks', listValue(item.blocks).join(', '), isView)}
+        ${inputField('blocked_by', 'Blocked By', listValue(item.blocked_by).join(', '), isView)}
         ${isCreate ? '' : `
           ${readonlyField('Created', item.created)}
           ${readonlyField('Developed', item.developed)}
@@ -975,6 +1163,9 @@ function renderItemForm(mode, item = {}) {
           ${readonlyField('Deferred', item.deferred)}
           ${readonlyField('Source File', item.path)}
           ${readonlyField('Folder', item.folder)}
+          <div class="field-row span-3"><span>Tags</span><strong>${tagBadges(item.tags)}</strong></div>
+          <div class="field-row span-3"><span>Blocks</span><strong>${linkedItemsHtml(item.blocks)}</strong></div>
+          <div class="field-row span-3"><span>Blocked By</span><strong>${linkedItemsHtml(item.blocked_by)}</strong></div>
         `}
         ${FORM_FIELDS.map(([name, label, section, rows]) => inputField(name, label, isCreate ? '' : sectionValue(item, section), isView, rows)).join('')}
         ${inputField('archive_reason', 'Archive Reason', item.archive_reason || '', isView)}
@@ -986,6 +1177,16 @@ function renderItemForm(mode, item = {}) {
           <button type="button" class="secondary" data-close-modal>Cancel</button>
         </div>
         <div id="modalMessage" class="create-message span-3" hidden></div>
+        ${!isCreate && isView ? `
+          <section class="activity-panel span-3">
+            <h3>Activity</h3>
+            ${activityHtml(item)}
+            <div class="activity-note-row">
+              <input id="activityNoteInput" type="text" placeholder="Add note">
+              <button id="activityNoteBtn" type="button" class="secondary small-button">Add Note</button>
+            </div>
+          </section>
+        ` : ''}
       </form>
     </section>
   `;
@@ -1004,6 +1205,7 @@ function openItemModal(mode, id = '') {
   document.getElementById('modalArchiveBtn')?.addEventListener('click', archiveCurrentItem);
   document.getElementById('modalPromptBtn')?.addEventListener('click', () => generatePrompt('item', id, false));
   document.getElementById('modalPromptBtnTop')?.addEventListener('click', () => generatePrompt('item', id, false));
+  document.getElementById('activityNoteBtn')?.addEventListener('click', () => addActivityNote(id));
   renderRows();
 }
 
@@ -1090,6 +1292,25 @@ async function archiveCurrentItem() {
   }
 }
 
+async function addActivityNote(id) {
+  const input = document.getElementById('activityNoteInput');
+  const note = input?.value?.trim() || '';
+  if (!note) return showModalMessage('Enter a note before adding it.', 'error');
+  try {
+    const response = await fetch(`/api/backlog/items/${encodeURIComponent(id)}/activity`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ note }),
+    });
+    const result = await response.json();
+    if (!response.ok || result.error) throw new Error(result.error || `Add note failed with ${response.status}`);
+    await loadBacklog();
+    openItemModal('view', id);
+  } catch (error) {
+    showModalMessage(error.message || 'Add note failed.', 'error');
+  }
+}
+
 function showError(message) {
   els.error.hidden = !message;
   els.error.textContent = message || '';
@@ -1154,7 +1375,8 @@ async function loadValidationMeta() {
 }
 
 function renderFinding(finding) {
-  return `<li><div><strong>${escapeHtml(finding.id || finding.path || 'Project')}</strong><span>${escapeHtml(finding.message)}</span></div>${finding.path ? `<code>${escapeHtml(finding.path)}</code>` : ''}${finding.suggestedFix ? `<p>${escapeHtml(finding.suggestedFix)}</p>` : ''}</li>`;
+  const fixButton = finding.fix ? `<button type="button" class="secondary small-button" data-validation-fix="${escapeHtml(finding.fix.action)}" data-validation-fix-id="${escapeHtml(finding.fix.id || '')}">${finding.fix.action === 'move-item' ? 'Move to correct folder' : 'Regenerate index'}</button>` : '';
+  return `<li><div><strong>${escapeHtml(finding.id || finding.path || 'Project')}</strong><span>${escapeHtml(finding.message)}</span></div>${finding.path ? `<code>${escapeHtml(finding.path)}</code>` : ''}${finding.suggestedFix ? `<p>${escapeHtml(finding.suggestedFix)}</p>` : ''}${fixButton}</li>`;
 }
 
 function renderValidationResults(result) {
@@ -1213,6 +1435,42 @@ function renderReleases(releases = []) {
   renderReleaseDetail();
 }
 
+async function runValidationFix(action, id = '') {
+  const response = await fetch('/api/backlog/fix', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action, id }),
+  });
+  const result = await response.json();
+  if (!response.ok || result.error) throw new Error(result.error || `Fix failed with ${response.status}`);
+  await loadBacklog();
+  await runValidation();
+}
+
+function releaseProgress(release) {
+  const groups = [
+    ['Not Started', ['Backlog', 'Ready']],
+    ['In Build', ['In Progress']],
+    ['In Test', ['Needs Validation']],
+    ['Done', ['Ready to Release', 'Done']],
+  ];
+  const total = Math.max(1, release.items?.length || 0);
+  return `
+    <div class="release-progress">
+      ${groups.map(([label, statuses]) => {
+        const count = (release.items || []).filter((item) => statuses.includes(item.status)).length;
+        const percent = Math.round((count / total) * 100);
+        return `<div class="release-progress-segment seg-${badgeKey(label)}" style="width:${percent}%"><span>${escapeHtml(label)} ${count} / ${percent}%</span></div>`;
+      }).join('')}
+    </div>
+  `;
+}
+
+function releaseEffortSummary(release) {
+  const counts = countBy(release.items || [], 'effort');
+  return EFFORT_OPTIONS.map((effort) => `<span class="summary-pill">${escapeHtml(effort)} <strong>${counts[effort] || 0}</strong></span>`).join('');
+}
+
 function renderReleaseDetail() {
   const release = state.releases.find((candidate) => candidate.id === state.selectedReleaseId) || state.releases[0];
   if (!release) return;
@@ -1229,6 +1487,13 @@ function renderReleaseDetail() {
       </div>
       ${badge(release.readiness, 'status')}
     </div>
+    <div class="release-status-row">
+      <label>Status
+        <select id="releaseStatusSelect" data-release-status="${escapeHtml(release.id)}">
+          ${['Planning', 'Active', 'Testing', 'Released', 'Ready for Development', 'In Development', 'Development Complete', 'Ready for Human Testing', 'Ready to Deploy', 'Deployed', 'Blocked', 'Cancelled'].map((status) => `<option value="${escapeHtml(status)}"${status === release.status ? ' selected' : ''}>${escapeHtml(status)}</option>`).join('')}
+        </select>
+      </label>
+    </div>
     <div class="detail-grid">
       ${readonlyField('Status', release.status)}
       ${readonlyField('Created', release.created)}
@@ -1243,6 +1508,14 @@ function renderReleaseDetail() {
     <section class="release-detail-section">
       <h3>Readiness by Status</h3>
       <div class="summary-pills">${statusCounts}</div>
+    </section>
+    <section class="release-detail-section">
+      <h3>Progress</h3>
+      ${release.itemCount ? releaseProgress(release) : '<p class="muted">No included items.</p>'}
+    </section>
+    <section class="release-detail-section">
+      <h3>Effort</h3>
+      <div class="summary-pills">${release.itemCount ? releaseEffortSummary(release) : '<span class="muted-inline">No included items.</span>'}</div>
     </section>
     <section class="release-detail-section">
       <h3>Items Needing Attention</h3>
@@ -1291,6 +1564,21 @@ async function createRelease() {
   } finally {
     els.createReleaseBtn.disabled = false;
     els.createReleaseBtn.textContent = 'Create Release';
+  }
+}
+
+async function updateReleaseStatus(releaseId, status) {
+  try {
+    const response = await fetch(`/api/releases/${encodeURIComponent(releaseId)}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    const result = await response.json();
+    if (!response.ok || result.error) throw new Error(result.error || `Release update failed with ${response.status}`);
+    await loadReleases();
+  } catch (error) {
+    showReleaseMessage(error.message || 'Release status update failed.', 'error');
   }
 }
 
@@ -1524,6 +1812,95 @@ async function generateChecklist(id, save) {
   }
 }
 
+function exportFilteredCsv() {
+  const rows = filteredItems();
+  const header = ['ID', 'Title', 'Status', 'Priority', 'Effort', 'Release', 'Type', 'Created', 'Updated'];
+  const csv = [
+    header.join(','),
+    ...rows.map((item) => [
+      item.id,
+      item.title,
+      item.status,
+      item.priority,
+      item.effort,
+      item.release,
+      itemType(item),
+      item.created,
+      item.updated,
+    ].map(csvCell).join(',')),
+  ].join('\n');
+  const label = activeProject()?.label || 'project';
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
+  const date = new Date().toISOString().slice(0, 10);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${slug}-backlog-${date}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function runFullTextSearch() {
+  if (!els.fullTextResults) return;
+  const query = state.filters.search.trim();
+  if (!state.filters.fullText || !query) {
+    els.fullTextResults.hidden = true;
+    els.fullTextResults.innerHTML = '';
+    return;
+  }
+  const response = await fetch(`/api/backlog/search?q=${encodeURIComponent(query)}`, { cache: 'no-store' });
+  const result = await response.json();
+  if (!response.ok || result.error) throw new Error(result.error || `Full-text search failed with ${response.status}`);
+  state.fullTextResults = result.items || [];
+  els.fullTextResults.hidden = false;
+  els.fullTextResults.innerHTML = state.fullTextResults.length
+    ? state.fullTextResults.slice(0, 12).map((item) => `<button type="button" class="search-result" data-open-item="${escapeHtml(item.id)}"><strong>${escapeHtml(item.id)}</strong><span>${escapeHtml(item.excerpt)}</span></button>`).join('')
+    : '<p class="muted">No full-text matches.</p>';
+}
+
+async function saveCurrentView() {
+  const name = prompt('Saved view name');
+  if (!name) return;
+  state.savedViews.push({ id: crypto.randomUUID(), name: name.trim(), filters: { ...state.filters } });
+  await persistSavedViews();
+}
+
+async function applySavedView(id) {
+  const view = state.savedViews.find((candidate) => candidate.id === id);
+  if (!view) return;
+  state.filters = { ...state.filters, ...view.filters };
+  els.searchFilter.value = state.filters.search || '';
+  els.fullTextSearchToggle.checked = Boolean(state.filters.fullText);
+  els.typeFilter.value = state.filters.type || '';
+  els.statusFilter.value = state.filters.status || '';
+  els.priorityFilter.value = state.filters.priority || '';
+  els.effortFilter.value = state.filters.effort || '';
+  els.releaseFilter.value = state.filters.release || '';
+  els.tagFilter.value = state.filters.tag || '';
+  els.folderFilter.value = state.filters.folder || '';
+  els.sortSelect.value = ['updated', 'priority', 'status', 'release'].includes(state.filters.sort) ? state.filters.sort : 'updated';
+  renderRows();
+  await runFullTextSearch();
+}
+
+async function renameSavedView() {
+  const id = els.savedViewSelect.value;
+  const view = state.savedViews.find((candidate) => candidate.id === id);
+  if (!view) return showError('Choose a saved view to rename.');
+  const name = prompt('Rename saved view', view.name);
+  if (!name) return;
+  view.name = name.trim();
+  await persistSavedViews();
+}
+
+async function deleteSavedView() {
+  const id = els.savedViewSelect.value;
+  if (!id) return showError('Choose a saved view to delete.');
+  state.savedViews = state.savedViews.filter((view) => view.id !== id);
+  await persistSavedViews();
+}
+
 async function loadBacklog() {
   els.refreshBtn.disabled = true;
   els.refreshBtn.textContent = 'Loading...';
@@ -1552,7 +1929,9 @@ async function loadBacklog() {
 }
 
 async function reloadProjectData() {
+  applyTheme();
   await loadConfig();
+  await loadSavedViews();
   await loadValidationMeta();
   await loadBacklog();
   await loadReleases();
@@ -1562,6 +1941,9 @@ async function reloadProjectData() {
 function applyFilter(field, value) {
   state.filters[field] = value;
   renderRows();
+  if (field === 'search' || field === 'fullText') {
+    runFullTextSearch().catch((error) => showError(error.message || 'Full-text search failed.'));
+  }
 }
 
 function setView(view) {
@@ -1577,6 +1959,8 @@ function setView(view) {
     releases: 'Release Workspace',
     validation: 'Validation',
     prompts: 'Prompt Workspace',
+    sprints: 'Sprint Planning',
+    roadmap: 'Roadmap',
     settings: 'Settings',
   };
   els.viewTitle.textContent = titles[view] || 'PM Tools';
@@ -1584,10 +1968,16 @@ function setView(view) {
 
 els.refreshBtn.addEventListener('click', () => { loadBacklog(); loadReleases(); });
 els.addItemBtn.addEventListener('click', () => openItemModal('create'));
+els.themeToggleBtn.addEventListener('click', () => saveTheme(currentTheme() === 'dark' ? 'light' : 'dark'));
 document.querySelectorAll('[data-view-target]').forEach((button) => {
   button.addEventListener('click', () => setView(button.dataset.viewTarget));
 });
 els.validateBtn.addEventListener('click', runValidation);
+els.validationResults.addEventListener('click', (event) => {
+  const btn = event.target.closest('[data-validation-fix]');
+  if (!btn) return;
+  runValidationFix(btn.dataset.validationFix, btn.dataset.validationFixId).catch((error) => showError(error.message || 'Validation fix failed.'));
+});
 els.refreshReleasesBtn.addEventListener('click', loadReleases);
 els.releaseSearch.addEventListener('input', () => renderReleases(state.releases));
 els.assignReleaseBtn.addEventListener('click', assignSelectedToRelease);
@@ -1694,12 +2084,20 @@ els.settingsPaths.addEventListener('click', async (event) => {
   }
 });
 els.searchFilter.addEventListener('input', (event) => applyFilter('search', event.target.value));
+els.fullTextSearchToggle.addEventListener('change', (event) => applyFilter('fullText', event.target.checked));
 els.typeFilter.addEventListener('change', (event) => applyFilter('type', event.target.value));
 els.statusFilter.addEventListener('change', (event) => applyFilter('status', event.target.value));
 els.priorityFilter.addEventListener('change', (event) => applyFilter('priority', event.target.value));
 els.effortFilter.addEventListener('change', (event) => applyFilter('effort', event.target.value));
 els.releaseFilter.addEventListener('change', (event) => applyFilter('release', event.target.value));
+els.tagFilter.addEventListener('change', (event) => applyFilter('tag', event.target.value));
 els.folderFilter.addEventListener('change', (event) => applyFilter('folder', event.target.value));
+els.saveViewBtn.addEventListener('click', () => saveCurrentView().catch((error) => showError(error.message)));
+els.savedViewSelect.addEventListener('change', (event) => applySavedView(event.target.value).catch((error) => showError(error.message)));
+els.renameViewBtn.addEventListener('click', () => renameSavedView().catch((error) => showError(error.message)));
+els.deleteViewBtn.addEventListener('click', () => deleteSavedView().catch((error) => showError(error.message)));
+els.exportCsvBtn.addEventListener('click', exportFilteredCsv);
+els.sprintCapacityInput.addEventListener('input', renderSprintBoard);
 els.bulkReleaseBtn.addEventListener('click', bulkAssignSelectedRelease);
 els.bulkPriorityBtn.addEventListener('click', () => {
   const priority = els.bulkPrioritySelect.value;
@@ -1747,6 +2145,35 @@ els.rows.addEventListener('click', (event) => {
   const id = opener?.dataset.openItem || row?.dataset.itemId;
   if (id) openItemModal('view', id);
 });
+els.rows.addEventListener('submit', async (event) => {
+  if (event.target.id !== 'quickAddForm') return;
+  event.preventDefault();
+  const payload = formPayload(event.target);
+  const title = payload.title?.trim();
+  if (!title) return showError('Enter a title for the quick-add item.');
+  const body = {
+    type: payload.type || 'Feature',
+    title,
+    summary: title,
+    problemNeed: 'Quick-added backlog item needs detail before implementation.',
+    expectedOutcome: 'Backlog item is captured for refinement.',
+    acceptanceCriteria: 'Backlog item exists in the table',
+  };
+  try {
+    const response = await fetch('/api/backlog/items', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const result = await response.json();
+    if (!response.ok || result.error) throw new Error(result.error || `Quick add failed with ${response.status}`);
+    await loadBacklog();
+    showError('');
+  } catch (error) {
+    showError(error.message || 'Quick add failed.');
+  }
+});
+els.rows.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && event.target.closest('#quickAddForm')) {
+    event.target.closest('form')?.reset();
+  }
+});
 els.statusBoard.addEventListener('click', (event) => {
   const overflow = event.target.closest('[data-board-status-filter]');
   if (overflow) {
@@ -1755,6 +2182,10 @@ els.statusBoard.addEventListener('click', (event) => {
     document.querySelector('.table-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return;
   }
+  const opener = event.target.closest('[data-open-item]');
+  if (opener) openItemModal('view', opener.dataset.openItem);
+});
+els.fullTextResults.addEventListener('click', (event) => {
   const opener = event.target.closest('[data-open-item]');
   if (opener) openItemModal('view', opener.dataset.openItem);
 });
@@ -1791,6 +2222,31 @@ els.releaseDetail.addEventListener('click', (event) => {
   if (checklist) generateChecklist(checklist.dataset.releaseChecklist, false);
   if (checklistSave) generateChecklist(checklistSave.dataset.releaseChecklistSave, true);
   if (vcPrompt) generatePrompt('version-control', vcPrompt.dataset.vcPromptRelease, false, 'release');
+});
+els.releaseDetail.addEventListener('change', (event) => {
+  const statusSelect = event.target.closest('[data-release-status]');
+  if (statusSelect) updateReleaseStatus(statusSelect.dataset.releaseStatus, statusSelect.value);
+});
+els.sprintBoard.addEventListener('change', async (event) => {
+  const select = event.target.closest('[data-sprint-assign]');
+  if (!select) return;
+  const item = state.items.find((candidate) => candidate.id === select.dataset.sprintAssign);
+  if (!item) return;
+  const result = await fetch(`/api/backlog/items/${encodeURIComponent(item.id)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title: item.title, status: item.status, priority: item.priority, effort: item.effort, release: item.release, tags: item.tags, blocks: item.blocks, blocked_by: item.blocked_by, sprint: select.value }),
+  }).then((response) => response.json());
+  if (result.error) showError(result.error);
+  await loadBacklog();
+});
+els.sprintBoard.addEventListener('click', (event) => {
+  const opener = event.target.closest('[data-open-item]');
+  if (opener) openItemModal('view', opener.dataset.openItem);
+});
+els.roadmapBoard.addEventListener('click', (event) => {
+  const opener = event.target.closest('[data-open-item]');
+  if (opener) openItemModal('view', opener.dataset.openItem);
 });
 
 // ── Status picker (ENH-0007) ──────────────────────────────────────────────────
@@ -1845,6 +2301,70 @@ document.addEventListener('click', (event) => {
 });
 
 // ── Kanban drag-and-drop (FEAT-0019) ─────────────────────────────────────────
+
+const shortcutsOverlay = document.createElement('div');
+shortcutsOverlay.id = 'shortcutsOverlay';
+shortcutsOverlay.className = 'shortcuts-overlay';
+shortcutsOverlay.hidden = true;
+shortcutsOverlay.innerHTML = `
+  <div class="shortcuts-panel">
+    <h2>Keyboard Shortcuts</h2>
+    <p><strong>Arrow Up / Arrow Down</strong> Move row focus</p>
+    <p><strong>Enter / O</strong> Open focused item</p>
+    <p><strong>S</strong> Open status picker</p>
+    <p><strong>Escape</strong> Close modal or picker</p>
+    <p><strong>?</strong> Show or hide this overlay</p>
+  </div>
+`;
+document.body.appendChild(shortcutsOverlay);
+
+function isTypingTarget(target) {
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+}
+
+function visibleRowIds() {
+  return filteredItems().map((item) => item.id);
+}
+
+function focusRow(delta) {
+  const ids = visibleRowIds();
+  if (!ids.length) return;
+  const current = ids.indexOf(state.focusedRowId);
+  const next = current === -1 ? 0 : Math.max(0, Math.min(ids.length - 1, current + delta));
+  state.focusedRowId = ids[next];
+  renderRows();
+  document.querySelector(`tr[data-item-id="${CSS.escape(state.focusedRowId)}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+
+document.addEventListener('keydown', (event) => {
+  if (isTypingTarget(event.target)) {
+    if (event.key === 'Escape' && event.target.closest('#quickAddForm')) event.target.closest('form')?.reset();
+    return;
+  }
+  if (event.key === '?') {
+    shortcutsOverlay.hidden = !shortcutsOverlay.hidden;
+    event.preventDefault();
+    return;
+  }
+  if (event.key === 'Escape') {
+    shortcutsOverlay.hidden = true;
+    if (!els.itemModal.hidden) closeItemModal();
+    if (!statusPickerEl.hidden) hideStatusPicker();
+    return;
+  }
+  if (state.currentView !== 'backlog') return;
+  if (event.key === 'ArrowDown') { focusRow(1); event.preventDefault(); }
+  if (event.key === 'ArrowUp') { focusRow(-1); event.preventDefault(); }
+  if ((event.key === 'Enter' || event.key.toLowerCase() === 'o') && state.focusedRowId) {
+    openItemModal('view', state.focusedRowId);
+    event.preventDefault();
+  }
+  if (event.key.toLowerCase() === 's' && state.focusedRowId) {
+    const badgeButton = document.querySelector(`tr[data-item-id="${CSS.escape(state.focusedRowId)}"] [data-status-pick]`);
+    if (badgeButton) showStatusPicker(state.focusedRowId, badgeButton);
+    event.preventDefault();
+  }
+});
 
 let draggedItemId = '';
 

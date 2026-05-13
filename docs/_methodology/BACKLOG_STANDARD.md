@@ -32,10 +32,10 @@ docs/project/backlog/
 
 Status determines folder location:
 
-- `active/`: New, Clarifying, Ready, Planned, In Development, Development Complete, Needs Review, Changes Requested, Ready for Testing, In Testing, Failed Testing, Passed Testing, Ready to Deploy, Blocked
-- `completed/`: Deployed
+- `active/`: Backlog, Ready, In Progress, Needs Validation, Ready to Release, Blocked
+- `completed/`: Done
 - `deferred/`: Deferred
-- `archived/`: Archived, Rejected, Duplicate
+- `archived/`: Archived
 
 ## IDs And Prefixes
 
@@ -67,24 +67,14 @@ Optional prefixes: `UX`, `UI`, `PERF`, `RISK`, `SPIKE`.
 
 Allowed statuses:
 
-- New
-- Clarifying
+- Backlog
 - Ready
-- Planned
-- In Development
-- Development Complete
-- Needs Review
-- Changes Requested
-- Ready for Testing
-- In Testing
-- Failed Testing
-- Passed Testing
-- Ready to Deploy
-- Deployed
+- In Progress
+- Needs Validation
+- Ready to Release
+- Done
 - Blocked
 - Deferred
-- Rejected
-- Duplicate
 - Archived
 
 Allowed priorities: Critical, High, Medium, Low, Someday, Parking Lot.
@@ -133,7 +123,7 @@ A backlog item is Ready only when:
 6. Dependencies or blockers are noted.
 7. The item is small enough to build, or explicitly approved as larger work.
 
-Normal implementation should start from `Ready` or `Planned`. Starting from `New` or `Clarifying` requires explicit requester approval.
+Normal implementation should start from `Ready`. Starting from `Backlog` requires explicit requester approval.
 
 ## Required Front Matter
 
@@ -143,7 +133,7 @@ id: FEAT-0001
 prefix: FEAT
 number: 0001
 title: Short title
-status: New
+status: Backlog
 priority: Medium
 effort: Unknown
 release: Unassigned
@@ -160,4 +150,3 @@ defer_reason:
 ```
 
 Use `release`, not milestone. Release values use app version format such as `v0.1.0`, or `Unassigned`.
-

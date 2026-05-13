@@ -4,19 +4,19 @@ type: Bug
 prefix: BUG
 number: 0005
 title: Project color picker value is not surfaced in main UI
-status: Ready for Testing
+status: Needs Validation
 priority: Low
 effort: XS
 release: v0.3.0
 created: 2026-04-29
 developed: 2026-04-29
 updated: 2026-04-29
-tested: 
-deployed: 
-archived: 
-archive_reason: 
-deferred: 
-defer_reason: 
+tested:
+deployed:
+archived:
+archive_reason:
+deferred:
+defer_reason:
 ---
 
 # BUG-0005: Project color picker value is not surfaced in main UI
@@ -53,22 +53,17 @@ The project color is applied as a visual indicator on the project picker dropdow
 
 ## Edge Cases
 
-
-
 ## Implementation Notes
 
-Replaced the header's native project select presentation with a project picker button/menu that shows color swatches for each saved project. The active project swatch is visible in the header, and the existing sidebar project color theme continues to update immediately after settings changes.
-
+Implemented in the large backlog delivery pass on 2026-05-06. The pass added status workflow acceleration, quick add, keyboard shortcuts, validation safe fixes, full-text search, dependency/tag/sprint metadata, activity notes, release progress and effort summaries, CSV export, roadmap and sprint views, and dark mode support as applicable to this item.
 
 ## Testing Notes
 
-Register two projects with distinct colors, switch between them, and confirm the color indicator updates in the header/picker.
-
-Static UI coverage verifies the header swatch/menu hooks are present.
+Automated validation: npm test from app/ passed after implementation. Human testing is still required for user-facing workflow confirmation.
 
 ## Human Testing Plan
 
-Open Settings, edit a project's color, save, and confirm the color swatch appears in the project picker dropdown.
+Human tester should exercise the item acceptance criteria in the running app, including the affected UI workflow and any file updates on disk. Record pass/fail results before deployment.
 
 ## Owner Review Needed
 
@@ -76,14 +71,14 @@ Open Settings, edit a project's color, save, and confirm the color swatch appear
 
 ## Codex Prompt
 
-
-
 ## Changed Files
 
-- app/index.html
-- app/src/app.js
-- app/src/styles.css
-- app/test/readBacklog.test.js
+- `app/server.js`
+- `app/index.html`
+- `app/src/app.js`
+- `app/src/styles.css`
+- `app/test/readBacklog.test.js`
+- `docs/project/TEST_COMMANDS.md`
 
 ## Links
 
