@@ -7,7 +7,7 @@ This runbook is project-specific to PM Tools. Keep it in this repository under `
 Use this runbook to deploy the current PM Tools methodology and data conventions into these projects:
 
 - `C:\My Projects\DistrictView`
-- `C:\My Projects\DictaFlow_android`
+- `C:\Users\srlob\OneDrive\Documents\My Projects\DictaFlow_Android` ✓ deployed 2026-05-13
 - `C:\My Projects\CardScan`
 - `C:\Users\srlob\OneDrive\Documents\My Projects\trading-agent`
 
@@ -265,7 +265,7 @@ Target registrations:
 | Label | Project path |
 |---|---|
 | `DistrictView` | `C:\My Projects\DistrictView\docs\project` |
-| `DictaFlow Android` | `C:\My Projects\DictaFlow_android\docs\project` |
+| `DictaFlow Android` | `C:\Users\srlob\OneDrive\Documents\My Projects\DictaFlow_Android\docs\project` |
 | `CardScan` | `C:\My Projects\CardScan\docs\project` |
 | `trading-agent` | `C:\Users\srlob\OneDrive\Documents\My Projects\trading-agent\docs\project` |
 
