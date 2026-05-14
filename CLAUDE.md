@@ -2,6 +2,24 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Role
+
+Claude Code is the sole developer and maintainer of this project. All development, bug fixes, and maintenance are performed by Claude Code. The user (Eduardo) is the product owner — he directs what to build and reviews the results.
+
+## Testing requirement
+
+After every fix or feature implementation, Claude Code must:
+1. Run the test suite (`npm test` from `app/`) and display the results
+2. Write and display a test plan covering what was changed and how it was verified
+3. Show the test results on screen before considering the task complete — never mark work done without showing evidence it works
+
+## Allowed actions (no confirmation needed)
+
+Claude Code may run the following without asking for permission:
+- `netstat` — check port usage
+- `taskkill` — kill processes (e.g. to free a port before restarting the server)
+- Reading any file or folder in the repository
+
 ## Commands
 
 All commands run from the `app/` directory:
