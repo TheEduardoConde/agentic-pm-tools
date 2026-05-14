@@ -76,6 +76,8 @@ function switchView(view) {
   const label = getActiveProjectLabel();
   const boardTitle = document.getElementById('boardTitle');
   if (boardTitle) boardTitle.textContent = label ? `Board — ${label}` : 'Board';
+  const releasesTitle = document.getElementById('releasesTitle');
+  if (releasesTitle) releasesTitle.textContent = label ? `Releases — ${label}` : 'Releases';
   if (view === 'board') renderBoard();
   if (view === 'releases') renderReleaseList();
   if (view === 'settings') renderSettings();
@@ -484,6 +486,51 @@ async function deleteItem(id) {
     showNotice(`${id} deleted.`);
   } catch (err) {
     showNotice(err.message, 'error');
+  }
+}
+
+function openBulkDeleteModal() {
+  const ids = [...state.selectedIds];
+  if (!ids.length) return;
+  const list = document.getElementById('bulkDeleteList');
+  if (list) {
+    list.innerHTML = ids.map((id) => {
+      const item = state.items.find((i) => i.id === id);
+      return `<li class="bulk-delete-item">
+        <span class="bulk-delete-id">${esc(id)}</span>
+        <span class="bulk-delete-title">${esc(item?.title || '—')}</span>
+      </li>`;
+    }).join('');
+  }
+  document.getElementById('bulkDeleteModal').hidden = false;
+  document.getElementById('bulkDeleteBackdrop').hidden = false;
+}
+
+function closeBulkDeleteModal() {
+  document.getElementById('bulkDeleteModal').hidden = true;
+  document.getElementById('bulkDeleteBackdrop').hidden = true;
+}
+
+async function confirmBulkDelete() {
+  const ids = [...state.selectedIds];
+  closeBulkDeleteModal();
+  let failed = 0;
+  for (const id of ids) {
+    try {
+      await api('DELETE', `/api/backlog/items/${encodeURIComponent(id)}`);
+    } catch {
+      failed++;
+    }
+  }
+  state.selectedIds.clear();
+  exitSelectMode();
+  await loadBacklog();
+  renderBoard();
+  updateStatusCounts();
+  if (failed) {
+    showNotice(`Deleted ${ids.length - failed} items. ${failed} failed.`, 'error');
+  } else {
+    showNotice(`${ids.length} item${ids.length > 1 ? 's' : ''} deleted.`);
   }
 }
 
@@ -1038,6 +1085,10 @@ function wire() {
   document.getElementById('createReleaseFromSelectionBtn')?.addEventListener('click', () => {
     openNewReleaseModal(state.selectedIds);
   });
+  document.getElementById('deleteSelectedBtn')?.addEventListener('click', openBulkDeleteModal);
+  document.getElementById('bulkDeleteConfirmBtn')?.addEventListener('click', confirmBulkDelete);
+  document.getElementById('bulkDeleteCancelBtn')?.addEventListener('click', closeBulkDeleteModal);
+  document.getElementById('bulkDeleteBackdrop')?.addEventListener('click', closeBulkDeleteModal);
 
   // New item button
   document.getElementById('newItemBtn')?.addEventListener('click', openNewItem);

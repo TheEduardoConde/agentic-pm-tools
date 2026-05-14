@@ -198,8 +198,30 @@
         <span class="selection-count" id="selectionCount">0 selected</span>
         <button class="secondary small-button" id="cancelSelectBtn">Cancel</button>
         <button class="btn-new-release small-button" id="createReleaseFromSelectionBtn">→ New Release</button>
+        <button class="danger small-button" id="deleteSelectedBtn">🗑 Delete Selected</button>
       </div>
     </section>
+
+    <!-- Bulk delete confirmation modal -->
+    <div class="modal-backdrop" id="bulkDeleteBackdrop" hidden></div>
+    <div class="modal" id="bulkDeleteModal" hidden role="dialog" aria-modal="true" aria-labelledby="bulkDeleteTitle">
+      <div class="modal-header">
+        <div>
+          <div class="eyebrow">Bulk Delete</div>
+          <h2 class="modal-title" id="bulkDeleteTitle">Delete selected items?</h2>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="bulk-delete-warning">
+          ⚠ This action is permanent and cannot be undone. The following items will be deleted:
+        </div>
+        <ul class="bulk-delete-list" id="bulkDeleteList"></ul>
+      </div>
+      <div class="modal-footer">
+        <button class="danger" id="bulkDeleteConfirmBtn">Delete All</button>
+        <button class="secondary" id="bulkDeleteCancelBtn">Cancel</button>
+      </div>
+    </div>
 
     <!-- ══════════════════════════════════════════════════════════
          RELEASES VIEW
@@ -208,7 +230,7 @@
       <div class="page-header">
         <div>
           <div class="eyebrow">Dispatch</div>
-          <h1>Releases</h1>
+          <h1 id="releasesTitle">Releases</h1>
         </div>
         <div class="header-actions">
           <button id="newReleaseBtn">+ New Release</button>
