@@ -83,6 +83,38 @@
         <span class="validation-badge" id="validationBadge" hidden>⚠ <span id="validationCount">0</span> issues</span>
       </div>
 
+      <!-- Status lanes -->
+      <div class="status-lanes" id="statusLanes">
+        <div class="status-lane" id="laneInbox">
+          <div class="lane-header lane-header--inbox">
+            <span class="lane-status-name">Inbox</span>
+            <span class="lane-count" id="laneCountInbox">0</span>
+          </div>
+          <div class="lane-body" id="laneBodyInbox"></div>
+        </div>
+        <div class="status-lane" id="laneReady">
+          <div class="lane-header lane-header--ready">
+            <span class="lane-status-name">Ready</span>
+            <span class="lane-count" id="laneCountReady">0</span>
+          </div>
+          <div class="lane-body" id="laneBodyReady"></div>
+        </div>
+        <div class="status-lane" id="laneInProgress">
+          <div class="lane-header lane-header--in-progress">
+            <span class="lane-status-name">In Progress</span>
+            <span class="lane-count" id="laneCountInProgress">0</span>
+          </div>
+          <div class="lane-body" id="laneBodyInProgress"></div>
+        </div>
+        <div class="status-lane" id="laneReview">
+          <div class="lane-header lane-header--review">
+            <span class="lane-status-name">Review</span>
+            <span class="lane-count" id="laneCountReview">0</span>
+          </div>
+          <div class="lane-body" id="laneBodyReview"></div>
+        </div>
+      </div>
+
       <!-- Filters -->
       <div class="filters" id="boardFilters">
         <label class="wide">

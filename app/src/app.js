@@ -59,6 +59,12 @@ async function loadAll() {
 
 // ── View switching ─────────────────────────────────────────────────────────
 
+function getActiveProjectLabel() {
+  const projects = state.config?.projects || [];
+  const activeId = state.config?.activeProjectId;
+  return projects.find((p) => p.id === activeId)?.label || null;
+}
+
 function switchView(view) {
   state.currentView = view;
   document.querySelectorAll('.view-section').forEach((s) => s.classList.remove('active'));
@@ -67,6 +73,9 @@ function switchView(view) {
   const navBtn = document.querySelector(`[data-view-target="${view}"]`);
   if (section) section.classList.add('active');
   if (navBtn) navBtn.classList.add('active');
+  const label = getActiveProjectLabel();
+  const boardTitle = document.getElementById('boardTitle');
+  if (boardTitle) boardTitle.textContent = label ? `Board — ${label}` : 'Board';
   if (view === 'board') renderBoard();
   if (view === 'releases') renderReleaseList();
   if (view === 'settings') renderSettings();
@@ -146,7 +155,37 @@ function sortItems(items) {
   });
 }
 
+function renderStatusLanes() {
+  const lanes = [
+    { status: 'Inbox',       bodyId: 'laneBodyInbox',      countId: 'laneCountInbox' },
+    { status: 'Ready',       bodyId: 'laneBodyReady',      countId: 'laneCountReady' },
+    { status: 'In Progress', bodyId: 'laneBodyInProgress', countId: 'laneCountInProgress' },
+    { status: 'Review',      bodyId: 'laneBodyReview',     countId: 'laneCountReview' },
+  ];
+  for (const { status, bodyId, countId } of lanes) {
+    const items = state.items.filter((i) => i.status === status);
+    const body = document.getElementById(bodyId);
+    const countEl = document.getElementById(countId);
+    if (!body) continue;
+    if (countEl) countEl.textContent = items.length;
+    if (!items.length) {
+      body.innerHTML = '<span class="lane-empty">— empty —</span>';
+      continue;
+    }
+    body.innerHTML = items.map((item) => `
+      <button class="lane-item" data-id="${esc(item.id)}">
+        <span class="lane-item-id">${esc(item.id)}</span>
+        <span class="lane-item-title">${esc(item.title)}</span>
+      </button>
+    `).join('');
+    body.querySelectorAll('.lane-item').forEach((btn) => {
+      btn.addEventListener('click', () => openItemDetail(btn.dataset.id));
+    });
+  }
+}
+
 function renderBoard() {
+  renderStatusLanes();
   const tbody = document.getElementById('backlogBody');
   if (!tbody) return;
 
@@ -793,6 +832,7 @@ async function activateProject(id) {
     renderBoard();
     updateStatusCounts();
     renderReleaseList();
+    switchView(state.currentView);
     showNotice('Project switched.');
   } catch (err) {
     showNotice(err.message, 'error');
@@ -1095,7 +1135,7 @@ async function init() {
   try {
     await loadAll();
     renderNavProject();
-    renderBoard();
+    switchView(state.currentView);
     updateStatusCounts();
   } catch (err) {
     showNotice(`Failed to load: ${err.message}`, 'error');
