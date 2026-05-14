@@ -1,58 +1,25 @@
 ---
 id: FEAT-0001
-prefix: FEAT
-number: 0001
+type: Feature
 title: Short title
-status: Backlog
+status: Inbox
 priority: Medium
 effort: Unknown
-release: Unassigned
+tags: []
+blocked_by: []
 created: YYYY-MM-DD
-developed:
 updated: YYYY-MM-DD
-tested:
-deployed:
-archived:
-archive_reason:
-deferred:
-defer_reason:
 ---
-
-# FEAT-0001: Short Title
 
 ## Summary
 
-Briefly describe the requested work.
-
-## Problem / Need
-
-Explain why this change is needed.
-
-## Expected Outcome
-
-Describe the expected result after the work is complete.
+Briefly describe the requested work and why it matters.
 
 ## Acceptance Criteria
 
 - [ ] Criterion with clear pass/fail outcome.
 - [ ] Criterion with clear pass/fail outcome.
 
-## Testing Notes
+## Implementation Notes
 
-List required automated checks, manual checks, or known validation limits.
-
-## Human Testing Plan
-
-State whether human testing is applicable. If not applicable, explain why.
-
-## Codex Prompt
-
-Paste the item-level Codex implementation prompt here when generated.
-
-## Changed Files
-
-- None yet.
-
-## Links
-
-- None.
+Add constraints, dependencies, or known implementation guidance.
