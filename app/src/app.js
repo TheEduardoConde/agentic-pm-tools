@@ -5,9 +5,9 @@ const STATUSES = ['Inbox', 'Ready', 'In Progress', 'Review', 'Done'];
 const PRIORITIES = ['Critical', 'High', 'Medium', 'Low', 'Someday'];
 const EFFORTS = ['XS', 'S', 'M', 'L', 'XL', 'Unknown'];
 const PROJECT_COLORS = [
-  '#253858', '#0052cc', '#0065ff', '#00875a', '#36b37e',
-  '#ff5630', '#ff7452', '#ff8b00', '#ffab00', '#6554c0',
-  '#8777d9', '#403294', '#00b8d9', '#00c7e6', '#57d9a3',
+  '#1d4ed8', '#7c3aed', '#0369a1', '#059669', '#ca8a04',
+  '#dc2626', '#db2777', '#2563eb', '#16a34a', '#9333ea',
+  '#0891b2', '#65a30d', '#c2410c', '#253858', '#374151',
 ];
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -76,11 +76,8 @@ function switchView(view) {
 
 function updateStatusCounts() {
   const pillIds = {
-    'Inbox': 'pillInbox',
-    'Ready': 'pillReady',
-    'In Progress': 'pillInProgress',
-    'Review': 'pillReview',
-    'Done': 'pillDone',
+    'Inbox': 'pillInbox', 'Ready': 'pillReady',
+    'In Progress': 'pillInProgress', 'Review': 'pillReview', 'Done': 'pillDone',
   };
   for (const [status, id] of Object.entries(pillIds)) {
     const count = state.items.filter((i) => i.status === status).length;
@@ -89,6 +86,33 @@ function updateStatusCounts() {
   }
   const countEl = document.getElementById('itemCount');
   if (countEl) countEl.textContent = `${state.items.length} items`;
+}
+
+// ── Badge helpers ──────────────────────────────────────────────────────────
+
+function statusBadge(status) {
+  const cls = (status || '').toLowerCase().replace(/\s+/g, '-');
+  return `<span class="badge badge-status bv-${cls}">${esc(status)}</span>`;
+}
+
+function priorityBadge(priority) {
+  if (!priority) return '';
+  const cls = (priority || '').toLowerCase();
+  return `<span class="badge badge-priority bv-${cls}">${esc(priority)}</span>`;
+}
+
+function effortBadge(effort) {
+  if (!effort) return '';
+  return `<span class="effort-badge">${esc(effort)}</span>`;
+}
+
+function tagChip(tag) {
+  return `<span class="tag-chip">${esc(tag)}</span>`;
+}
+
+function dispatchBadge(status) {
+  const cls = (status || 'draft').toLowerCase();
+  return `<span class="dispatch-badge dispatch-badge--${cls}">${esc(status || 'Draft')}</span>`;
 }
 
 // ── Board rendering ────────────────────────────────────────────────────────
@@ -122,14 +146,6 @@ function sortItems(items) {
   });
 }
 
-function statusClass(status) {
-  return `bv-${(status || '').toLowerCase().replace(/\s+/g, '-')}`;
-}
-
-function priorityClass(priority) {
-  return `bv-priority-${(priority || '').toLowerCase()}`;
-}
-
 function renderBoard() {
   const tbody = document.getElementById('backlogBody');
   if (!tbody) return;
@@ -144,20 +160,20 @@ function renderBoard() {
 
   for (const item of filtered) {
     const tr = document.createElement('tr');
-    if (state.selectedIds.has(item.id)) tr.classList.add('row-selected');
+    if (state.selectedIds.has(item.id)) tr.classList.add('selected');
     tr.dataset.id = item.id;
 
-    const tags = (item.tags || []).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join('');
+    const tags = (item.tags || []).map(tagChip).join('');
 
     tr.innerHTML = `
-      <td class="col-check"><input type="checkbox" class="row-checkbox" data-id="${item.id}" ${state.selectedIds.has(item.id) ? 'checked' : ''} /></td>
+      <td class="td-check"><input type="checkbox" class="row-checkbox" data-id="${item.id}" ${state.selectedIds.has(item.id) ? 'checked' : ''} /></td>
       <td><span class="item-id-link" data-id="${item.id}">${esc(item.id)}</span></td>
       <td><span class="item-title-link" data-id="${item.id}">${esc(item.title)}</span>${tags ? `<span class="tag-chips">${tags}</span>` : ''}</td>
-      <td><span class="badge ${statusClass(item.status)}">${esc(item.status)}</span></td>
-      <td>${item.priority ? `<span class="badge ${priorityClass(item.priority)}">${esc(item.priority)}</span>` : ''}</td>
-      <td>${item.effort ? `<span class="effort-badge">${esc(item.effort)}</span>` : ''}</td>
-      <td>${esc(item.type || '')}</td>
-      <td>${formatDate(item.updated || item.created)}</td>
+      <td>${statusBadge(item.status)}</td>
+      <td>${priorityBadge(item.priority)}</td>
+      <td>${effortBadge(item.effort)}</td>
+      <td><span class="type-label">${esc(item.type || '')}</span></td>
+      <td class="date-cell">${formatDate(item.updated || item.created)}</td>
     `;
     tbody.appendChild(tr);
   }
@@ -185,16 +201,16 @@ function toggleRowSelect(id) {
     state.selectedIds.add(id);
   }
   updateSelectionBar();
-  // update just this row's checkbox
   const cb = document.querySelector(`.row-checkbox[data-id="${id}"]`);
   if (cb) cb.checked = state.selectedIds.has(id);
   const tr = document.querySelector(`tr[data-id="${id}"]`);
-  if (tr) tr.classList.toggle('row-selected', state.selectedIds.has(id));
+  if (tr) tr.classList.toggle('selected', state.selectedIds.has(id));
 }
 
 function enterSelectMode() {
   state.selectMode = true;
-  document.getElementById('selectModeBtn').textContent = 'Cancel';
+  const btn = document.getElementById('selectModeBtn');
+  if (btn) btn.textContent = 'Cancel';
   updateSelectionBar();
 }
 
@@ -209,13 +225,6 @@ function exitSelectMode() {
 
 // ── Item modal ─────────────────────────────────────────────────────────────
 
-function showItemFormSection(show) {
-  const formSec = document.getElementById('itemFormSection');
-  const detailSec = document.getElementById('itemDetailSection');
-  if (formSec) formSec.hidden = !show;
-  if (detailSec) detailSec.hidden = show;
-}
-
 function openNewItem() {
   const modal = document.getElementById('itemModal');
   if (!modal) return;
@@ -223,14 +232,18 @@ function openNewItem() {
   form.reset();
   form.dataset.mode = 'create';
   delete form.dataset.id;
-  document.getElementById('itemModalTitle').textContent = 'Create backlog item';
-  document.getElementById('itemModalEyebrow').textContent = 'New Item';
-  document.getElementById('itemFormSubmit').textContent = 'Create Item';
-  // hide status field for create (always starts as Inbox)
+  setEl('itemModalTitle', 'Create backlog item');
+  setEl('itemModalEyebrow', 'New Item');
+  setEl('itemFormSubmit', 'Create Item');
   const statusLabel = document.getElementById('itemStatus')?.closest('label');
   if (statusLabel) statusLabel.style.display = 'none';
-  showItemFormSection(true);
+  const deleteBtn = document.getElementById('itemFormDeleteBtn');
+  if (deleteBtn) deleteBtn.hidden = true;
+  document.getElementById('itemFormSection').hidden = false;
+  document.getElementById('itemDetailSection').hidden = true;
+  document.getElementById('itemFormMsg').textContent = '';
   modal.hidden = false;
+  document.getElementById('itemTitle')?.focus();
 }
 
 function openItemDetail(id) {
@@ -242,13 +255,15 @@ function openItemDetail(id) {
 
   form.dataset.mode = 'edit';
   form.dataset.id = id;
-  document.getElementById('itemModalTitle').textContent = item.title;
-  document.getElementById('itemModalEyebrow').textContent = id;
-  document.getElementById('itemFormSubmit').textContent = 'Save Changes';
+  setEl('itemModalTitle', item.title);
+  setEl('itemModalEyebrow', id);
+  setEl('itemFormSubmit', 'Save Changes');
 
-  // show status field for edit
   const statusLabel = document.getElementById('itemStatus')?.closest('label');
   if (statusLabel) statusLabel.style.display = '';
+
+  const deleteBtn = document.getElementById('itemFormDeleteBtn');
+  if (deleteBtn) deleteBtn.hidden = false;
 
   setVal('itemType', item.type);
   setVal('itemTitle', item.title);
@@ -261,13 +276,24 @@ function openItemDetail(id) {
   setVal('itemAC', item.acceptanceCriteria || '');
   setVal('itemImplNotes', item.implementationNotes || '');
 
-  showItemFormSection(true);
+  document.getElementById('itemFormSection').hidden = false;
+  document.getElementById('itemDetailSection').hidden = true;
+  document.getElementById('itemFormMsg').textContent = '';
   modal.hidden = false;
+}
+
+function setEl(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
 }
 
 function setVal(id, value) {
   const el = document.getElementById(id);
   if (el) el.value = value ?? '';
+}
+
+function getVal(id) {
+  return document.getElementById(id)?.value ?? '';
 }
 
 function closeItemModal() {
@@ -280,6 +306,8 @@ async function submitItemForm(e) {
   const form = e.target;
   const mode = form.dataset.mode;
   const id = form.dataset.id;
+  const msgEl = document.getElementById('itemFormMsg');
+  if (msgEl) msgEl.textContent = '';
 
   const payload = {
     type: getVal('itemType'),
@@ -294,9 +322,8 @@ async function submitItemForm(e) {
     implementationNotes: getVal('itemImplNotes'),
   };
 
-  const msgEl = document.getElementById('itemFormMsg');
-  if (msgEl) msgEl.textContent = '';
-
+  const submitBtn = document.getElementById('itemFormSubmit');
+  if (submitBtn) submitBtn.disabled = true;
   try {
     if (mode === 'create') {
       await api('POST', '/api/backlog/items', payload);
@@ -310,11 +337,9 @@ async function submitItemForm(e) {
   } catch (err) {
     if (msgEl) msgEl.textContent = err.message;
     else showNotice(err.message, 'error');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
   }
-}
-
-function getVal(id) {
-  return document.getElementById(id)?.value ?? '';
 }
 
 async function deleteItem(id) {
@@ -325,6 +350,7 @@ async function deleteItem(id) {
     await loadBacklog();
     renderBoard();
     updateStatusCounts();
+    showNotice(`${id} deleted.`);
   } catch (err) {
     showNotice(err.message, 'error');
   }
@@ -340,6 +366,9 @@ function renderReleaseList() {
 
   if (countEl) countEl.textContent = state.releases.length;
 
+  const existing = scroll.querySelectorAll('.release-list-item');
+  existing.forEach((el) => el.remove());
+
   if (!state.releases.length) {
     if (emptyEl) emptyEl.hidden = false;
     showReleaseEmpty();
@@ -347,20 +376,16 @@ function renderReleaseList() {
   }
   if (emptyEl) emptyEl.hidden = true;
 
-  // Build list items inside the scroll container (keep the empty notice element)
-  const existing = scroll.querySelectorAll('.release-list-item');
-  existing.forEach((el) => el.remove());
-
   for (const rel of state.releases) {
     const div = document.createElement('div');
     div.className = `release-list-item${state.activeReleaseId === rel.id ? ' active' : ''}`;
     div.dataset.id = rel.id;
     div.innerHTML = `
-      <div class="release-item-header">
-        <span class="release-item-title">${esc(rel.title)}</span>
-        <span class="dispatch-badge dispatch-badge-${(rel.status || 'draft').toLowerCase()}">${esc(rel.status || 'Draft')}</span>
+      <div class="rli-header">
+        <span class="rli-title">${esc(rel.title)}</span>
+        ${dispatchBadge(rel.status)}
       </div>
-      <div class="release-item-meta">${rel.items?.length || 0} items · ${formatDate(rel.created)}</div>
+      <div class="rli-meta">${rel.items?.length || 0} items · ${formatDate(rel.created)}</div>
     `;
     div.addEventListener('click', () => {
       state.activeReleaseId = rel.id;
@@ -394,18 +419,17 @@ function renderReleaseDetail(release) {
   if (emptyState) emptyState.hidden = true;
   detailContent.hidden = false;
 
-  // Header
   const titleEl = document.getElementById('releaseDetailTitle');
   const statusEl = document.getElementById('releaseDetailStatus');
   const dateEl = document.getElementById('releaseDetailDate');
   if (titleEl) titleEl.textContent = release.title;
   if (statusEl) {
+    const cls = (release.status || 'draft').toLowerCase();
     statusEl.textContent = release.status || 'Draft';
-    statusEl.className = `dispatch-badge dispatch-badge-${(release.status || 'draft').toLowerCase()}`;
+    statusEl.className = `dispatch-badge dispatch-badge--${cls}`;
   }
   if (dateEl) dateEl.textContent = `Created ${formatDate(release.created)}`;
 
-  // Dispatch button
   const dispatchBtn = document.getElementById('dispatchReleaseBtn');
   if (dispatchBtn) {
     dispatchBtn.textContent = release.status === 'Dispatched' ? '⚡ Re-dispatch' : '⚡ Dispatch to Claude Code';
@@ -419,41 +443,37 @@ function renderReleaseDetail(release) {
   const editTitleBtn = document.getElementById('editReleaseTitleBtn');
   if (editTitleBtn) editTitleBtn.dataset.id = release.id;
 
-  // Item count
   const itemCount = document.getElementById('releaseItemCount');
   if (itemCount) itemCount.textContent = `${release.items?.length || 0}`;
 
-  // Items list
   const itemsList = document.getElementById('releaseItemsList');
   if (itemsList) {
     if (!release.items?.length) {
-      itemsList.innerHTML = `<div class="empty" style="padding:10px 0;color:var(--muted)">No items. Add some below.</div>`;
+      itemsList.innerHTML = `<div class="release-items-empty">No items yet. Use the picker below to add items.</div>`;
     } else {
       itemsList.innerHTML = (release.items || []).map((id) => {
         const item = state.items.find((i) => i.id === id);
-        if (!item) return `<div class="release-item-row missing">${esc(id)} <span style="color:var(--muted)">(not found)</span></div>`;
+        if (!item) return `<div class="release-item-row missing"><span class="item-id-mono">${esc(id)}</span><span class="release-item-title missing-label">(not found)</span></div>`;
         return `
           <div class="release-item-row">
-            <span class="badge ${statusClass(item.status)}" style="flex-shrink:0">${esc(item.status)}</span>
-            <span class="item-id-link release-item-id" data-id="${item.id}">${esc(item.id)}</span>
-            <span class="release-row-title">${esc(item.title)}</span>
-            <button class="link-button remove-item-btn" data-release-id="${release.id}" data-item-id="${item.id}" title="Remove">×</button>
+            ${statusBadge(item.status)}
+            <span class="item-id-mono clickable" data-id="${item.id}">${esc(item.id)}</span>
+            <span class="release-item-title">${esc(item.title)}</span>
+            <button class="remove-item" data-release-id="${release.id}" data-item-id="${item.id}" title="Remove from release">×</button>
           </div>
         `;
       }).join('');
-      itemsList.querySelectorAll('.item-id-link').forEach((el) => {
+      itemsList.querySelectorAll('.item-id-mono.clickable').forEach((el) => {
         el.addEventListener('click', () => openItemDetail(el.dataset.id));
       });
-      itemsList.querySelectorAll('.remove-item-btn').forEach((btn) => {
+      itemsList.querySelectorAll('.remove-item').forEach((btn) => {
         btn.addEventListener('click', () => removeItemFromRelease(btn.dataset.releaseId, btn.dataset.itemId));
       });
     }
   }
 
-  // Item picker (add to release)
   populateItemPicker(release);
 
-  // Work package section
   const wpSection = document.getElementById('workPackageSection');
   const wpPreview = document.getElementById('workPackagePreview');
   if (wpSection && wpPreview) {
@@ -474,8 +494,8 @@ function populateItemPicker(release) {
   if (!picker) return;
   const inRelease = new Set(release.items || []);
   const candidates = state.items.filter((i) => !inRelease.has(i.id) && i.status !== 'Done');
-  picker.innerHTML = '<option value="">Add an item to this release…</option>'
-    + candidates.map((i) => `<option value="${i.id}">[${i.status}] ${esc(i.id)} — ${esc(i.title)}</option>`).join('');
+  picker.innerHTML = '<option value="">— Add an item to this release —</option>'
+    + candidates.map((i) => `<option value="${i.id}">[${i.status}] ${esc(i.id)} — ${esc(i.title.slice(0, 60))}</option>`).join('');
 }
 
 async function removeItemFromRelease(releaseId, itemId) {
@@ -536,6 +556,7 @@ async function deleteRelease(releaseId) {
     state.activeReleaseId = null;
     await loadReleases();
     renderReleaseList();
+    showNotice('Release deleted.');
   } catch (err) {
     showNotice(err.message, 'error');
   }
@@ -549,6 +570,7 @@ async function renameRelease(releaseId) {
     await api('PUT', `/api/releases/${encodeURIComponent(releaseId)}`, { title: newTitle.trim() });
     await loadReleases();
     renderReleaseList();
+    showNotice('Release renamed.');
   } catch (err) {
     showNotice(err.message, 'error');
   }
@@ -565,9 +587,11 @@ function openNewReleaseModal(preselectedIds) {
   if (note) {
     const n = preselectedIds?.size || 0;
     note.textContent = n > 0
-      ? `${n} item${n > 1 ? 's' : ''} will be included in this release.`
-      : 'No items currently selected. You can add items after creating the release.';
+      ? `${n} item${n > 1 ? 's' : ''} will be included.`
+      : 'No items selected — you can add them after creating the release.';
   }
+  const msgEl = document.getElementById('newReleaseMsg');
+  if (msgEl) msgEl.textContent = '';
   modal.hidden = false;
   if (input) input.focus();
 }
@@ -596,6 +620,7 @@ async function saveNewRelease() {
     state.activeReleaseId = relId;
     closeNewReleaseModal();
     switchView('releases');
+    showNotice(`Release "${title}" created.`);
   } catch (err) {
     if (msgEl) msgEl.textContent = err.message;
   }
@@ -626,18 +651,18 @@ function renderProjectList() {
   for (const proj of projects) {
     const isActive = proj.id === activeId;
     const li = document.createElement('li');
-    li.className = `project-row${isActive ? ' project-row-active' : ''}`;
+    li.className = `project-list-item${isActive ? ' active' : ''}`;
     li.innerHTML = `
-      <span class="project-swatch" style="background:${esc(proj.color || '#253858')}"></span>
+      <span class="project-color-swatch" style="background:${esc(proj.color || '#253858')}"></span>
       <div class="project-info">
         <strong>${esc(proj.label || proj.id)}</strong>
-        <span class="project-path">${esc(proj.path)}</span>
+        <code>${esc(proj.path)}</code>
       </div>
-      <div class="project-row-actions">
+      <div class="project-actions">
         ${isActive
           ? '<span class="active-badge">Active</span>'
           : `<button class="secondary small-button activate-project-btn" data-id="${proj.id}">Switch</button>`}
-        <button class="link-button danger remove-project-btn" data-id="${proj.id}" title="Remove">×</button>
+        <button class="ghost small-button remove-project-btn" data-id="${proj.id}" title="Remove">✕</button>
       </div>
     `;
     list.appendChild(li);
@@ -655,11 +680,16 @@ function renderColorPicker(selected) {
   const picker = document.getElementById('colorChoiceList');
   if (!picker) return;
   picker.innerHTML = PROJECT_COLORS.map((c) => `
-    <label class="color-choice${c === selected ? ' selected' : ''}">
-      <input type="radio" name="projectColor" value="${c}" ${c === selected ? 'checked' : ''} />
-      <span class="color-swatch" style="background:${c}"></span>
+    <label class="color-choice${c === selected ? ' selected' : ''}" style="background:${c}" title="${c}">
+      <input type="radio" name="projectColor" value="${c}" ${c === selected ? 'checked' : ''} style="position:absolute;opacity:0;width:0;height:0" />
     </label>
   `).join('');
+  picker.querySelectorAll('.color-choice').forEach((lbl) => {
+    lbl.addEventListener('click', () => {
+      picker.querySelectorAll('.color-choice').forEach((l) => l.classList.remove('selected'));
+      lbl.classList.add('selected');
+    });
+  });
 }
 
 async function activateProject(id) {
@@ -671,6 +701,7 @@ async function activateProject(id) {
     renderBoard();
     updateStatusCounts();
     renderReleaseList();
+    showNotice('Project switched.');
   } catch (err) {
     showNotice(err.message, 'error');
   }
@@ -683,6 +714,7 @@ async function removeProject(id) {
     await api('PUT', '/api/config', { projects });
     await loadConfig();
     renderProjectList();
+    showNotice('Project removed.');
   } catch (err) {
     showNotice(err.message, 'error');
   }
@@ -706,7 +738,7 @@ async function submitProjectForm(e) {
     renderColorPicker(PROJECT_COLORS[0]);
     await loadConfig();
     renderProjectList();
-    showNotice('Project added.');
+    showNotice(`Project "${label}" added.`);
   } catch (err) {
     showNotice(err.message, 'error');
   }
@@ -730,16 +762,16 @@ function renderProjectPicker() {
   const projects = state.config?.projects || [];
   const activeId = state.config?.activeProjectId;
   if (!projects.length) {
-    menu.innerHTML = `<div style="padding:.5rem .75rem;color:var(--fg-muted);font-size:.8125rem">No projects</div>`;
+    menu.innerHTML = `<div class="picker-empty">No projects configured</div>`;
     return;
   }
   menu.innerHTML = projects.map((p) => `
-    <button class="project-picker-option${p.id === activeId ? ' active' : ''}" data-id="${p.id}">
-      <span class="project-picker-swatch" style="background:${esc(p.color || '#253858')}"></span>
+    <button class="nav-project-option${p.id === activeId ? ' active' : ''}" data-id="${p.id}">
+      <span class="nav-project-swatch" style="background:${esc(p.color || '#253858')}"></span>
       ${esc(p.label || p.id)}
     </button>
   `).join('');
-  menu.querySelectorAll('.project-picker-option').forEach((btn) => {
+  menu.querySelectorAll('.nav-project-option').forEach((btn) => {
     btn.addEventListener('click', () => {
       activateProject(btn.dataset.id);
       closeProjectPicker();
@@ -781,14 +813,13 @@ function showNotice(msg, type = 'info') {
   if (!notice) {
     notice = document.createElement('div');
     notice.id = 'globalNotice';
-    notice.className = 'global-notice';
     document.body.appendChild(notice);
   }
   notice.textContent = msg;
-  notice.className = `global-notice global-notice-${type}`;
+  notice.className = `global-notice global-notice--${type}`;
   notice.hidden = false;
   clearTimeout(notice._timer);
-  notice._timer = setTimeout(() => { notice.hidden = true; }, 3500);
+  notice._timer = setTimeout(() => { notice.hidden = true; }, 4000);
 }
 
 // ── Event wiring ───────────────────────────────────────────────────────────
@@ -824,6 +855,7 @@ function wire() {
     state.filters = { search: '', status: '', type: '', priority: '', tag: '' };
     ['filterSearch', 'filterTag'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
     ['filterStatus', 'filterType', 'filterPriority'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+    document.querySelectorAll('.status-pill').forEach((p) => p.classList.remove('active-filter'));
     renderBoard();
   });
 
@@ -831,14 +863,17 @@ function wire() {
   document.querySelectorAll('.status-pill[data-filter-status]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const s = btn.dataset.filterStatus;
-      state.filters.status = state.filters.status === s ? '' : s;
+      const isActive = state.filters.status === s;
+      state.filters.status = isActive ? '' : s;
       const sel = document.getElementById('filterStatus');
       if (sel) sel.value = state.filters.status;
+      document.querySelectorAll('.status-pill').forEach((p) => p.classList.remove('active-filter'));
+      if (!isActive) btn.classList.add('active-filter');
       renderBoard();
     });
   });
 
-  // Board table clicks
+  // Board table clicks (event delegation)
   document.getElementById('backlogBody')?.addEventListener('click', (e) => {
     const checkbox = e.target.closest('.row-checkbox');
     if (checkbox) {
@@ -863,17 +898,16 @@ function wire() {
     updateSelectionBar();
   });
 
-  // Select mode toggle
+  // Select mode
   document.getElementById('selectModeBtn')?.addEventListener('click', () => {
-    if (state.selectMode) exitSelectMode();
-    else enterSelectMode();
+    if (state.selectMode) exitSelectMode(); else enterSelectMode();
   });
   document.getElementById('cancelSelectBtn')?.addEventListener('click', exitSelectMode);
   document.getElementById('createReleaseFromSelectionBtn')?.addEventListener('click', () => {
     openNewReleaseModal(state.selectedIds);
   });
 
-  // New item
+  // New item button
   document.getElementById('newItemBtn')?.addEventListener('click', openNewItem);
 
   // Item modal
@@ -881,12 +915,12 @@ function wire() {
   document.getElementById('itemModalBackdrop')?.addEventListener('click', closeItemModal);
   document.getElementById('itemForm')?.addEventListener('submit', submitItemForm);
   document.getElementById('itemFormCancel')?.addEventListener('click', closeItemModal);
-  document.getElementById('itemDeleteBtn')?.addEventListener('click', () => {
+  document.getElementById('itemFormDeleteBtn')?.addEventListener('click', () => {
     const id = document.getElementById('itemForm')?.dataset.id;
     if (id) deleteItem(id);
   });
 
-  // Release view
+  // Release view static buttons
   document.getElementById('newReleaseBtn')?.addEventListener('click', () => openNewReleaseModal(state.selectedIds));
   document.getElementById('dispatchReleaseBtn')?.addEventListener('click', () => {
     const id = document.getElementById('dispatchReleaseBtn')?.dataset.id;
@@ -907,7 +941,7 @@ function wire() {
     const pre = document.getElementById('workPackagePreview');
     if (pre?.textContent) {
       await navigator.clipboard.writeText(pre.textContent);
-      showNotice('Copied to clipboard!');
+      showNotice('Work package copied to clipboard!');
     }
   });
 
@@ -924,8 +958,7 @@ function wire() {
   document.getElementById('projectPickerBtn')?.addEventListener('click', (e) => {
     e.stopPropagation();
     const menu = document.getElementById('projectPickerMenu');
-    if (menu?.hidden) openProjectPicker();
-    else closeProjectPicker();
+    if (menu?.hidden) openProjectPicker(); else closeProjectPicker();
   });
   document.addEventListener('click', (e) => {
     if (!e.target.closest('#projectPicker')) closeProjectPicker();
@@ -936,6 +969,7 @@ function wire() {
 
   // Sort columns
   document.querySelectorAll('th[data-sort]').forEach((th) => {
+    th.style.cursor = 'pointer';
     th.addEventListener('click', () => {
       const key = th.dataset.sort;
       if (state.sort.key === key) {
@@ -944,6 +978,8 @@ function wire() {
         state.sort.key = key;
         state.sort.dir = 'asc';
       }
+      document.querySelectorAll('th[data-sort]').forEach((h) => h.classList.remove('sort-asc', 'sort-desc'));
+      th.classList.add(state.sort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
       renderBoard();
     });
   });
