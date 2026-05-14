@@ -1386,7 +1386,10 @@ await runTest('UI static files expose combined Backlog Dashboard workspace and n
   assert.ok(html.includes('project-picker'));
   assert.ok(!html.includes('dashboard-action-cards'));
   assert.ok(html.includes('ctx-total'));
-  assert.ok(html.includes('ctx-completed'));
+  assert.ok(html.includes('ctx-bug'));
+  assert.ok(html.includes('ctx-feat'));
+  assert.ok(html.includes('ctx-enh'));
+  assert.ok(html.includes('ctx-ux'));
   assert.ok(html.includes('data-view-target="backlog"'));
   assert.ok(html.includes('data-view-target="releases"'));
   assert.ok(html.includes('data-view-target="sprints"'));
@@ -1399,9 +1402,9 @@ await runTest('UI static files expose combined Backlog Dashboard workspace and n
   assert.ok(html.includes('Needs Attention'));
   assert.ok(html.includes('Recent Activity'));
   assert.ok(!html.includes('Release Readiness'));
-  assert.ok(!html.includes('By Status'));
+  assert.ok(html.includes('By Status'));
+  assert.ok(html.includes('Open Items by Type'));
   assert.ok(!html.includes('By Priority'));
-  assert.ok(!html.includes('By Type'));
   assert.ok(html.includes('Lifecycle Board'));
   assert.ok(html.includes('Release Workspace'));
   assert.ok(html.includes('Prompt Workspace'));

@@ -1858,6 +1858,79 @@ Version-control approval rule:
 ${VC_RULE}`;
 }
 
+export function generateItemClaudeCodePrompt(item) {
+  return `You are working in this repository using the project PM methodology.
+
+Methodology files to read first:
+- ./docs/_methodology/STARTUP.md
+- ./docs/_methodology/BACKLOG_STANDARD.md
+- ./docs/_methodology/DELIVERY_STANDARD.md
+
+Source-of-truth files:
+- ./docs/project/${item.path}
+- ./docs/project/TEST_COMMANDS.md
+
+Backlog item:
+- ${item.id}: ${item.title}
+
+Acceptance Criteria:
+${item.sections?.['Acceptance Criteria']?.content || '- Review the backlog item acceptance criteria.'}
+
+Scope-control rule:
+${SCOPE_RULE}
+
+Testing rule:
+Read ./docs/project/TEST_COMMANDS.md before running tests. Run the required commands when applicable. If the file is missing, infer likely commands, label them as inferred, and recommend creating TEST_COMMANDS.md.
+
+Backlog update rule:
+Update the related backlog item file with status, lifecycle dates, implementation notes, testing notes, changed files, and links when applicable.
+
+Agent Completion Report rule:
+After implementation, provide an Agent Completion Report.
+
+Version-control approval rule:
+${VC_RULE}`;
+}
+
+export function generateReleaseClaudeCodePrompt(release, items) {
+  return `You are working in this repository using the project PM methodology.
+
+Methodology files to read first:
+- ./docs/_methodology/STARTUP.md
+- ./docs/_methodology/BACKLOG_STANDARD.md
+- ./docs/_methodology/DELIVERY_STANDARD.md
+- ./docs/_methodology/RELEASE_STANDARD.md
+
+Source-of-truth files:
+- ./docs/project/releases/${release.fileName}
+${items.map((item) => `- ./docs/project/${item.path}`).join('\n')}
+- ./docs/project/TEST_COMMANDS.md
+
+Release:
+- ${release.id}
+
+Included backlog item IDs:
+${release.itemIds.map((id) => `- ${id}`).join('\n') || '- None'}
+
+Acceptance Criteria:
+${items.map((item) => `\n${item.id}: ${item.title}\n${item.sections?.['Acceptance Criteria']?.content || '- Review item file.'}`).join('\n')}
+
+Scope-control rule:
+${SCOPE_RULE}
+
+Testing rule:
+Read ./docs/project/TEST_COMMANDS.md before running tests. Run the required commands when applicable. If the file is missing, infer likely commands, label them as inferred, and recommend creating TEST_COMMANDS.md.
+
+Backlog update rule:
+Update related backlog item files with status, lifecycle dates, implementation notes, testing notes, changed files, and links when applicable.
+
+Agent Completion Report rule:
+After implementation, provide an Agent Completion Report.
+
+Version-control approval rule:
+${VC_RULE}`;
+}
+
 export function generateHumanTestingChecklist(release, items) {
   const lines = [`# Human Testing Checklist for ${release.id}`, ''];
   for (const item of items) {
@@ -1919,6 +1992,23 @@ export async function generatePrompt(input = {}, projectPath = DEFAULT_PROJECT_P
     const items = release.itemIds.map((id) => itemById.get(id)).filter(Boolean);
     const prompt = generateReleaseCodexPrompt(release, items);
     if (save) await saveSectionToFile(projectPath, release.path, 'Codex Development Prompt', prompt);
+    return { type, id: release.id, prompt, saved: save };
+  }
+  if (type === 'claude-item') {
+    const item = backlog.items.find((candidate) => candidate.id === input.id);
+    if (!item) return { error: `Backlog item not found: ${input.id}`, statusCode: 404 };
+    const prompt = generateItemClaudeCodePrompt(item);
+    if (save) await saveSectionToFile(projectPath, item.path, 'Claude Code Prompt', prompt);
+    return { type, id: item.id, prompt, saved: save };
+  }
+  if (type === 'claude-release') {
+    const releases = await readReleaseFiles(projectPath);
+    const release = releases.find((candidate) => candidate.id === input.id);
+    if (!release) return { error: `Release not found: ${input.id}`, statusCode: 404 };
+    const itemById = new Map(backlog.items.map((item) => [item.id, item]));
+    const items = release.itemIds.map((id) => itemById.get(id)).filter(Boolean);
+    const prompt = generateReleaseClaudeCodePrompt(release, items);
+    if (save) await saveSectionToFile(projectPath, release.path, 'Claude Code Development Prompt', prompt);
     return { type, id: release.id, prompt, saved: save };
   }
   if (type === 'version-control') {

@@ -46,14 +46,26 @@
         </header>
 
         <section class="view-section active" data-view="backlog">
-          <section class="dashboard-context-strip" aria-label="Project context">
-            <div class="ctx-stat ctx-total"><span class="ctx-label">Total</span><strong id="itemCount">0</strong></div>
-            <div class="ctx-stat ctx-active"><span class="ctx-label">Active</span><strong id="activeCount">0</strong></div>
-            <div class="ctx-stat ctx-build"><span class="ctx-label">In Progress</span><strong id="developmentCount">0</strong></div>
-            <div class="ctx-stat ctx-new"><span class="ctx-label">Backlog</span><strong id="newCount">0</strong></div>
-            <div class="ctx-stat ctx-testing"><span class="ctx-label">Ready Release</span><strong id="passedTestingCount">0</strong></div>
-            <div class="ctx-stat ctx-completed"><span class="ctx-label">Done</span><strong id="completedCount">0</strong></div>
-          </section>
+          <div class="dashboard-stats" aria-label="Project summary">
+            <div class="dashboard-stat-section">
+              <span class="stat-section-label">Open Items by Type</span>
+              <div class="dashboard-context-strip four-up">
+                <div class="ctx-stat ctx-bug"><span class="ctx-label">Bugs</span><strong id="bugCount">0</strong></div>
+                <div class="ctx-stat ctx-feat"><span class="ctx-label">Features</span><strong id="featCount">0</strong></div>
+                <div class="ctx-stat ctx-enh"><span class="ctx-label">Enhancements</span><strong id="enhCount">0</strong></div>
+                <div class="ctx-stat ctx-ux"><span class="ctx-label">UI / UX</span><strong id="uxCount">0</strong></div>
+              </div>
+            </div>
+            <div class="dashboard-stat-section">
+              <span class="stat-section-label">By Status</span>
+              <div class="dashboard-context-strip four-up">
+                <div class="ctx-stat ctx-build"><span class="ctx-label">Active</span><strong id="activeCount">0</strong></div>
+                <div class="ctx-stat ctx-testing"><span class="ctx-label">Needs Validation</span><strong id="needsValCount">0</strong></div>
+                <div class="ctx-stat ctx-new"><span class="ctx-label">Deferred / Backlog</span><strong id="deferredBacklogCount">0</strong></div>
+                <div class="ctx-stat ctx-total"><span class="ctx-label">Total Items</span><strong id="itemCount">0</strong></div>
+              </div>
+            </div>
+          </div>
 
           <section class="dashboard-grid">
             <article class="dashboard-panel panel-danger">
@@ -200,8 +212,10 @@
             <div class="prompt-controls">
               <label>Prompt Type
                 <select id="promptType">
-                  <option value="item">Item Development Prompt</option>
-                  <option value="release">Release Development Prompt</option>
+                  <option value="item">Codex — Item Development Prompt</option>
+                  <option value="release">Codex — Release Development Prompt</option>
+                  <option value="claude-item">Claude Code — Item Development Prompt</option>
+                  <option value="claude-release">Claude Code — Release Development Prompt</option>
                   <option value="checklist">Human Testing Checklist</option>
                   <option value="version-control">Version Control Prompt</option>
                 </select>

@@ -113,14 +113,12 @@ const els = {
   themeToggleBtn: document.getElementById('themeToggleBtn'),
   itemCount: document.getElementById('itemCount'),
   activeCount: document.getElementById('activeCount'),
-  completedCount: document.getElementById('completedCount'),
-  newCount: document.getElementById('newCount'),
-  developmentCount: document.getElementById('developmentCount'),
-  readyTestingCount: document.getElementById('readyTestingCount'),
-  passedTestingCount: document.getElementById('passedTestingCount'),
-  blockedCount: document.getElementById('blockedCount'),
-  clarifyingCount: document.getElementById('clarifyingCount'),
-  deployReadyCount: document.getElementById('deployReadyCount'),
+  needsValCount: document.getElementById('needsValCount'),
+  deferredBacklogCount: document.getElementById('deferredBacklogCount'),
+  bugCount: document.getElementById('bugCount'),
+  featCount: document.getElementById('featCount'),
+  enhCount: document.getElementById('enhCount'),
+  uxCount: document.getElementById('uxCount'),
   loadedAt: document.getElementById('loadedAt'),
   prioritySummary: document.getElementById('prioritySummary'),
   statusSummary: document.getElementById('statusSummary'),
@@ -914,16 +912,16 @@ async function removeProject(projectId) {
 
 function renderDashboard() {
   const open = state.items.filter((item) => item.folder !== 'completed' && item.folder !== 'archived');
-  els.itemCount.textContent = String(state.items.length);
-  els.activeCount.textContent = String(state.items.filter((item) => item.folder === 'active').length);
-  els.completedCount.textContent = String(state.items.filter((item) => item.status === 'Done').length);
-  if (els.blockedCount) els.blockedCount.textContent = String(state.items.filter((item) => item.status === 'Blocked').length);
-  if (els.clarifyingCount) els.clarifyingCount.textContent = String(state.items.filter((item) => item.status === 'Backlog').length);
-  if (els.deployReadyCount) els.deployReadyCount.textContent = String(state.items.filter((item) => ['Ready', 'Ready to Release'].includes(item.status)).length);
-  els.newCount.textContent = String(state.items.filter((item) => item.status === 'Backlog').length);
-  els.developmentCount.textContent = String(state.items.filter((item) => item.status === 'In Progress').length);
-  if (els.readyTestingCount) els.readyTestingCount.textContent = String(state.items.filter((item) => item.status === 'Needs Validation').length);
-  els.passedTestingCount.textContent = String(state.items.filter((item) => item.status === 'Ready to Release').length);
+  const ACTIVE_STATUSES = new Set(['In Progress', 'Ready', 'Blocked', 'Ready to Release']);
+  const DEFERRED_BACKLOG_STATUSES = new Set(['Backlog', 'Deferred']);
+  els.itemCount.textContent = String(open.length);
+  els.activeCount.textContent = String(open.filter((item) => ACTIVE_STATUSES.has(item.status)).length);
+  els.needsValCount.textContent = String(open.filter((item) => item.status === 'Needs Validation').length);
+  els.deferredBacklogCount.textContent = String(open.filter((item) => DEFERRED_BACKLOG_STATUSES.has(item.status)).length);
+  els.bugCount.textContent = String(open.filter((item) => item.prefix === 'BUG').length);
+  els.featCount.textContent = String(open.filter((item) => item.prefix === 'FEAT').length);
+  els.enhCount.textContent = String(open.filter((item) => item.prefix === 'ENH').length);
+  els.uxCount.textContent = String(open.filter((item) => item.prefix === 'UX' || item.prefix === 'UI').length);
   if (els.prioritySummary) renderPills(els.prioritySummary, countBy(open, 'priority'));
   if (els.statusSummary) renderGroupedStatusPills(els.statusSummary, countBy(open, 'status'));
   if (els.typeSummary) renderPills(els.typeSummary, countByType(open));
@@ -1526,8 +1524,10 @@ function renderReleaseDetail() {
       ${releaseItemsTable(release.items ?? [])}
     </section>
     <div class="release-actions detail-actions">
-      <button type="button" class="secondary" data-release-prompt="${escapeHtml(release.id)}">Generate Release Codex Prompt</button>
-      <button type="button" class="secondary" data-release-prompt-save="${escapeHtml(release.id)}">Save Release Prompt</button>
+      <button type="button" class="secondary" data-release-prompt="${escapeHtml(release.id)}">Generate Codex Prompt</button>
+      <button type="button" class="secondary" data-release-prompt-save="${escapeHtml(release.id)}">Save Codex Prompt</button>
+      <button type="button" class="secondary" data-release-claude-prompt="${escapeHtml(release.id)}">Generate Claude Code Prompt</button>
+      <button type="button" class="secondary" data-release-claude-prompt-save="${escapeHtml(release.id)}">Save Claude Code Prompt</button>
       <button type="button" class="secondary" data-release-checklist="${escapeHtml(release.id)}">Generate Human Testing Checklist</button>
       <button type="button" class="secondary" data-release-checklist-save="${escapeHtml(release.id)}">Save Checklist</button>
       <button type="button" class="secondary" data-vc-prompt-release="${escapeHtml(release.id)}">Generate Version-Control Prompt</button>
@@ -1635,6 +1635,24 @@ async function generatePromptFromWorkspace(save = false) {
         return;
       }
       await generatePrompt('release', releaseId, save);
+      return;
+    }
+    if (promptType === 'claude-release') {
+      const releaseId = els.promptReleaseSelect.value;
+      if (!releaseId) {
+        els.promptOutput.textContent = 'Select a release first.';
+        return;
+      }
+      await generatePrompt('claude-release', releaseId, save);
+      return;
+    }
+    if (promptType === 'claude-item') {
+      const itemId = els.promptItemSelect.value;
+      if (!itemId) {
+        els.promptOutput.textContent = 'Select a backlog item first.';
+        return;
+      }
+      await generatePrompt('claude-item', itemId, save);
       return;
     }
     if (promptType === 'version-control') {
@@ -2214,6 +2232,8 @@ els.releaseList.addEventListener('click', (event) => {
 els.releaseDetail.addEventListener('click', (event) => {
   const prompt = event.target.closest('[data-release-prompt]');
   const promptSave = event.target.closest('[data-release-prompt-save]');
+  const claudePrompt = event.target.closest('[data-release-claude-prompt]');
+  const claudePromptSave = event.target.closest('[data-release-claude-prompt-save]');
   const checklist = event.target.closest('[data-release-checklist]');
   const checklistSave = event.target.closest('[data-release-checklist-save]');
   const vcPrompt = event.target.closest('[data-vc-prompt-release]');
@@ -2221,6 +2241,8 @@ els.releaseDetail.addEventListener('click', (event) => {
   if (opener) openItemModal('view', opener.dataset.openItem);
   if (prompt) generatePrompt('release', prompt.dataset.releasePrompt, false);
   if (promptSave) generatePrompt('release', promptSave.dataset.releasePromptSave, true);
+  if (claudePrompt) generatePrompt('claude-release', claudePrompt.dataset.releaseClaudePrompt, false);
+  if (claudePromptSave) generatePrompt('claude-release', claudePromptSave.dataset.releaseClaudePromptSave, true);
   if (checklist) generateChecklist(checklist.dataset.releaseChecklist, false);
   if (checklistSave) generateChecklist(checklistSave.dataset.releaseChecklistSave, true);
   if (vcPrompt) generatePrompt('version-control', vcPrompt.dataset.vcPromptRelease, false, 'release');

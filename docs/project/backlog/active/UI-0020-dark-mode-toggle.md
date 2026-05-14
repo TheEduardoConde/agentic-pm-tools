@@ -4,23 +4,23 @@ type: User Interface
 prefix: UI
 number: 0020
 title: Dark mode toggle
-status: Needs Validation
+status: Ready to Release
 priority: Low
 effort: S
 release: Unassigned
 tags: []
 blocks: []
 blocked_by: []
-sprint:
+sprint: 
 created: 2026-04-29
 developed: 2026-05-06
-updated: 2026-05-06
-tested:
-deployed:
-archived:
-archive_reason:
-deferred:
-defer_reason:
+updated: 2026-05-13
+tested: 2026-05-13
+deployed: 
+archived: 
+archive_reason: 
+deferred: 
+defer_reason: 
 ---
 
 # UI-0020: Dark mode toggle
@@ -59,6 +59,8 @@ A toggle in the header or Settings switches between light and dark themes. The p
 
 ## Edge Cases
 
+
+
 ## Implementation Notes
 
 Implemented in the large backlog delivery pass on 2026-05-06. The pass added status workflow acceleration, quick add, keyboard shortcuts, validation safe fixes, full-text search, dependency/tag/sprint metadata, activity notes, release progress and effort summaries, CSV export, roadmap and sprint views, and dark mode support as applicable to this item.
@@ -77,6 +79,8 @@ Human tester should exercise the item acceptance criteria in the running app, in
 
 ## Codex Prompt
 
+
+
 ## Changed Files
 
 - `app/server.js`
@@ -90,6 +94,9 @@ Human tester should exercise the item acceptance criteria in the running app, in
 
 - 2026-05-06T15:44:24.846Z - Status changed from New to Development Complete.
 - 2026-05-06T15:44:24.886Z - Status changed from Development Complete to Ready for Testing.
+- 2026-05-13T19:27:28.152Z - Status changed from Needs Validation to Blocked.
+- 2026-05-13T19:27:48.068Z - Status changed from Blocked to Needs Validation.
+- 2026-05-13T20:38:48.612Z - Status changed from Needs Validation to Ready to Release.
 
 ## Links
 

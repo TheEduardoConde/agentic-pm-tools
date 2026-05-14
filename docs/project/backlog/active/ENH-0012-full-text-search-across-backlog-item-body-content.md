@@ -4,23 +4,23 @@ type: Enhancement
 prefix: ENH
 number: 0012
 title: Full-text search across backlog item body content
-status: Needs Validation
+status: Ready to Release
 priority: Medium
 effort: M
 release: Unassigned
 tags: []
 blocks: []
 blocked_by: []
-sprint:
+sprint: 
 created: 2026-04-29
 developed: 2026-05-06
-updated: 2026-05-06
-tested:
-deployed:
-archived:
-archive_reason:
-deferred:
-defer_reason:
+updated: 2026-05-13
+tested: 2026-05-13
+deployed: 
+archived: 
+archive_reason: 
+deferred: 
+defer_reason: 
 ---
 
 # ENH-0012: Full-text search across backlog item body content
@@ -59,6 +59,8 @@ The search bar (or a dedicated "full-text" toggle) sends the query to a new serv
 
 ## Edge Cases
 
+
+
 ## Implementation Notes
 
 Implemented in the large backlog delivery pass on 2026-05-06. The pass added status workflow acceleration, quick add, keyboard shortcuts, validation safe fixes, full-text search, dependency/tag/sprint metadata, activity notes, release progress and effort summaries, CSV export, roadmap and sprint views, and dark mode support as applicable to this item.
@@ -82,6 +84,8 @@ Human tester should exercise the item acceptance criteria in the running app, in
 
 ## Codex Prompt
 
+
+
 ## Changed Files
 
 - `app/server.js`
@@ -95,6 +99,7 @@ Human tester should exercise the item acceptance criteria in the running app, in
 
 - 2026-05-06T15:44:24.280Z - Status changed from New to Development Complete.
 - 2026-05-06T15:44:24.316Z - Status changed from Development Complete to Ready for Testing.
+- 2026-05-13T20:38:48.376Z - Status changed from Needs Validation to Ready to Release.
 
 ## Links
 

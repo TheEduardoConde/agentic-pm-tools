@@ -4,23 +4,23 @@ type: Feature
 prefix: FEAT
 number: 0019
 title: Kanban drag-and-drop status change
-status: Needs Validation
+status: Ready to Release
 priority: High
 effort: L
 release: v0.3.1
 tags: []
 blocks: []
 blocked_by: []
-sprint:
+sprint: 
 created: 2026-04-29
 developed: 2026-05-06
-updated: 2026-05-06
-tested:
-deployed:
-archived:
-archive_reason:
-deferred:
-defer_reason:
+updated: 2026-05-13
+tested: 2026-05-13
+deployed: 
+archived: 
+archive_reason: 
+deferred: 
+defer_reason: 
 ---
 
 # FEAT-0019: Kanban drag-and-drop status change
@@ -61,6 +61,8 @@ Cards on the lifecycle board are draggable. Dropping a card into a different sta
 
 ## Edge Cases
 
+
+
 ## Implementation Notes
 
 Implemented in the large backlog delivery pass on 2026-05-06. The pass added status workflow acceleration, quick add, keyboard shortcuts, validation safe fixes, full-text search, dependency/tag/sprint metadata, activity notes, release progress and effort summaries, CSV export, roadmap and sprint views, and dark mode support as applicable to this item.
@@ -79,6 +81,8 @@ Human tester should exercise the item acceptance criteria in the running app, in
 
 ## Codex Prompt
 
+
+
 ## Changed Files
 
 - `app/server.js`
@@ -91,6 +95,7 @@ Human tester should exercise the item acceptance criteria in the running app, in
 ## Activity
 
 - 2026-05-06T15:44:24.680Z - Status changed from Development Complete to Ready for Testing.
+- 2026-05-13T20:38:48.529Z - Status changed from Needs Validation to Ready to Release.
 
 ## Links
 

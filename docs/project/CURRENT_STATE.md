@@ -26,20 +26,21 @@
 
 ## Known Gaps
 
-All current active backlog items are implemented and marked ready for human testing. Remaining work is human QA, release approval, and deployment/version-control approval.
+- **ENH-0011 (Validation auto-fix)**: The safe-fix buttons for mechanical issues (folder moves, index regeneration) are not implemented in the UI. The Validation view explicitly states "Safe-fix buttons are future scope." This item remains in `Needs Validation`.
 
-## End Of Day Snapshot - 2026-05-07
+## End Of Day Snapshot - 2026-05-13
 
 Completed today:
 
-- Simplified the backlog lifecycle to the solo developer / AI-assisted workflow: `Backlog`, `Ready`, `In Progress`, `Needs Validation`, `Ready to Release`, `Done`, `Blocked`, `Deferred`, and `Archived`.
-- Updated PM Tools app behavior, validation, tests, UI labels, and methodology docs to use the simplified lifecycle.
-- Committed the lifecycle migration, backlog expansion, and harness setup (CLAUDE.md, .claude/commands, .gitignore).
+- Full automated human testing pass on all 21 backlog items in `Needs Validation` using Claude-in-Chrome browser automation.
+- 20 items passed all acceptance criteria and were promoted to `Ready to Release`.
+- 1 item failed (ENH-0011): no auto-fix buttons implemented in Validation UI — remains in `Needs Validation`.
 
 Recommended next work:
 
-1. Human QA pass on the 21 items in `Needs Validation` status.
-2. Promote validated items to `Ready to Release` and plan v0.2.0 / v0.3.0 / v0.3.1 releases.
+1. Decide disposition for ENH-0011 — implement fix buttons or defer to a future release.
+2. Plan and cut releases for the 20 `Ready to Release` items (candidates: v0.2.0, v0.3.0, v0.3.1 per existing release assignments).
+3. Run release approval workflow and deploy.
 
 ## Useful Commands
 

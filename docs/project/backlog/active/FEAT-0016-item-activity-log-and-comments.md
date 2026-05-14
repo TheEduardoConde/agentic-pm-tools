@@ -4,23 +4,23 @@ type: Feature
 prefix: FEAT
 number: 0016
 title: Item activity log and comments
-status: Needs Validation
+status: Ready to Release
 priority: Low
 effort: L
 release: Unassigned
 tags: []
 blocks: []
 blocked_by: []
-sprint:
+sprint: 
 created: 2026-04-29
 developed: 2026-05-06
-updated: 2026-05-06
-tested:
-deployed:
-archived:
-archive_reason:
-deferred:
-defer_reason:
+updated: 2026-05-13
+tested: 2026-05-13
+deployed: 
+archived: 
+archive_reason: 
+deferred: 
+defer_reason: 
 ---
 
 # FEAT-0016: Item activity log and comments
@@ -59,6 +59,8 @@ Every status change stamps an entry like `- 2026-04-29: Status changed from Back
 
 ## Edge Cases
 
+
+
 ## Implementation Notes
 
 Implemented in the large backlog delivery pass on 2026-05-06. The pass added status workflow acceleration, quick add, keyboard shortcuts, validation safe fixes, full-text search, dependency/tag/sprint metadata, activity notes, release progress and effort summaries, CSV export, roadmap and sprint views, and dark mode support as applicable to this item.
@@ -80,6 +82,8 @@ Human tester should exercise the item acceptance criteria in the running app, in
 
 ## Codex Prompt
 
+
+
 ## Changed Files
 
 - `app/server.js`
@@ -93,6 +97,10 @@ Human tester should exercise the item acceptance criteria in the running app, in
 
 - 2026-05-06T15:44:24.524Z - Status changed from New to Development Complete.
 - 2026-05-06T15:44:24.552Z - Status changed from Development Complete to Ready for Testing.
+- 2026-05-13T19:20:43.489Z - Note: Test note from automated testing
+- 2026-05-13T19:27:28.125Z - Status changed from Needs Validation to Blocked.
+- 2026-05-13T19:27:48.072Z - Status changed from Blocked to Needs Validation.
+- 2026-05-13T20:38:48.524Z - Status changed from Needs Validation to Ready to Release.
 
 ## Links
 

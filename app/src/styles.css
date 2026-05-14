@@ -521,13 +521,39 @@ textarea:focus {
 .stat-card.stat-success strong { color: var(--color-success); }
 
 /* ================================================================
-   DASHBOARD — CONTEXT STRIP (secondary 6-up)
+   DASHBOARD — STAT SECTIONS (two groups in one row)
    ================================================================ */
+.dashboard-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+
+.dashboard-stat-section {
+  display: flex;
+  flex: 1 1 400px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.stat-section-label {
+  color: var(--muted);
+  font-size: var(--font-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .dashboard-context-strip {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  margin-bottom: 16px;
+}
+
+.dashboard-context-strip.four-up {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .ctx-stat {
@@ -587,6 +613,34 @@ textarea:focus {
   --ctx-bg: #f0fdf4;
   --ctx-border: #bbf7d0;
   --ctx-label: #166534;
+}
+
+.ctx-bug {
+  --ctx-accent: #dc2626;
+  --ctx-bg: #fef2f2;
+  --ctx-border: #fecaca;
+  --ctx-label: #991b1b;
+}
+
+.ctx-feat {
+  --ctx-accent: #2563eb;
+  --ctx-bg: #eff6ff;
+  --ctx-border: #bfdbfe;
+  --ctx-label: #1e40af;
+}
+
+.ctx-enh {
+  --ctx-accent: #7c3aed;
+  --ctx-bg: #f5f3ff;
+  --ctx-border: #c4b5fd;
+  --ctx-label: #5b21b6;
+}
+
+.ctx-ux {
+  --ctx-accent: #0891b2;
+  --ctx-bg: #ecfeff;
+  --ctx-border: #a5f3fc;
+  --ctx-label: #155e75;
 }
 
 .ctx-label {

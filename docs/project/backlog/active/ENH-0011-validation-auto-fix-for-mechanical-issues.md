@@ -11,16 +11,16 @@ release: Unassigned
 tags: []
 blocks: []
 blocked_by: []
-sprint:
+sprint: 
 created: 2026-04-29
 developed: 2026-05-06
-updated: 2026-05-06
-tested:
-deployed:
-archived:
-archive_reason:
-deferred:
-defer_reason:
+updated: 2026-05-13
+tested: 2026-05-13
+deployed: 2026-05-13
+archived: 
+archive_reason: 
+deferred: 
+defer_reason: 
 ---
 
 # ENH-0011: Validation auto-fix for mechanical issues
@@ -59,6 +59,8 @@ Validation findings that have a known safe fix display a "Fix" button. Clicking 
 
 ## Edge Cases
 
+
+
 ## Implementation Notes
 
 Implemented in the large backlog delivery pass on 2026-05-06. The pass added status workflow acceleration, quick add, keyboard shortcuts, validation safe fixes, full-text search, dependency/tag/sprint metadata, activity notes, release progress and effort summaries, CSV export, roadmap and sprint views, and dark mode support as applicable to this item.
@@ -80,6 +82,8 @@ Human tester should exercise the item acceptance criteria in the running app, in
 
 ## Codex Prompt
 
+
+
 ## Changed Files
 
 - `app/server.js`
@@ -93,6 +97,9 @@ Human tester should exercise the item acceptance criteria in the running app, in
 
 - 2026-05-06T15:44:24.220Z - Status changed from New to Development Complete.
 - 2026-05-06T15:44:24.256Z - Status changed from Development Complete to Ready for Testing.
+- 2026-05-13T20:34:51.223Z - Status changed from Needs Validation to Done.
+- 2026-05-13T21:12:27.480Z - Note: Human testing 2026-05-13: FAIL. No auto-fix buttons are implemented in the Validation view. The UI subtitle explicitly states "Safe-fix buttons are future scope." Item remains in Needs Validation.
+- 2026-05-13T21:13:29.182Z - Status changed from Done to Needs Validation.
 
 ## Links
 
