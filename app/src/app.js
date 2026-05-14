@@ -239,6 +239,8 @@ function openNewItem() {
   if (statusLabel) statusLabel.style.display = 'none';
   const deleteBtn = document.getElementById('itemFormDeleteBtn');
   if (deleteBtn) deleteBtn.hidden = true;
+  const promptActionsEl = document.getElementById('itemPromptActions');
+  if (promptActionsEl) promptActionsEl.hidden = true;
   document.getElementById('itemFormSection').hidden = false;
   document.getElementById('itemDetailSection').hidden = true;
   document.getElementById('itemFormMsg').textContent = '';
@@ -264,6 +266,9 @@ function openItemDetail(id) {
 
   const deleteBtn = document.getElementById('itemFormDeleteBtn');
   if (deleteBtn) deleteBtn.hidden = false;
+
+  const promptActions = document.getElementById('itemPromptActions');
+  if (promptActions) promptActions.hidden = false;
 
   setVal('itemType', item.type);
   setVal('itemTitle', item.title);
@@ -299,6 +304,93 @@ function getVal(id) {
 function closeItemModal() {
   const modal = document.getElementById('itemModal');
   if (modal) modal.hidden = true;
+}
+
+function buildItemPrompt(tool) {
+  const id = document.getElementById('itemForm')?.dataset.id;
+  const item = id ? state.items.find((i) => i.id === id) : null;
+  if (!item) return null;
+
+  const acText = (item.acceptanceCriteria || '').trim()
+    .split('\n').map((l) => l.startsWith('- ') || l.startsWith('* ') ? l : `- ${l}`).join('\n');
+  const implNotes = (item.implementationNotes || '').trim();
+  const tags = (item.tags || []).join(', ') || 'none';
+  const blockedBy = (item.blocked_by || []).join(', ') || 'none';
+
+  const itemBlock = `\
+## ${item.id} — ${item.title}
+**Type:** ${item.type} | **Priority:** ${item.priority} | **Effort:** ${item.effort || 'Unknown'}
+**Tags:** ${tags} | **Blocked by:** ${blockedBy}
+
+### Summary
+${(item.summary || '').trim()}
+
+### Acceptance Criteria
+${acText}
+${implNotes ? `\n### Implementation Notes\n${implNotes}` : ''}`;
+
+  const sharedInstructions = `\
+Read the Acceptance Criteria carefully before writing any code.
+Implement only the scope described — do not refactor, expand, or redesign beyond what is listed.
+Verify every acceptance criterion explicitly before reporting complete.
+After completing the item, update its \`status\` field in its frontmatter to \`Review\`.
+Do not commit, push, merge, rebase, force push, tag, release, or deploy without explicit approval.
+
+Your completion report must include:
+- What was implemented and what files changed
+- How each acceptance criterion was verified
+- Any known limitations or follow-up items`;
+
+  if (tool === 'claude-code') {
+    return `\
+# Claude Code — Single Item Implementation
+
+You are implementing one approved backlog item.
+
+Before starting, read the project methodology files if present:
+- \`docs/_methodology/STARTUP.md\`
+- \`docs/_methodology/BACKLOG_STANDARD.md\`
+- \`docs/_methodology/DELIVERY_STANDARD.md\`
+
+${sharedInstructions}
+
+---
+
+${itemBlock}
+`;
+  } else {
+    return `\
+# Codex — Single Item Implementation
+
+You are implementing one approved backlog item.
+
+Before starting, read the project methodology files if present:
+- \`docs/_methodology/STARTUP.md\`
+- \`docs/_methodology/BACKLOG_STANDARD.md\`
+- \`docs/_methodology/DELIVERY_STANDARD.md\`
+
+${sharedInstructions}
+
+Your completion report must also include:
+- Automated test plan and results (commands + output)
+- Human testing plan with preconditions, steps, and expected results
+
+---
+
+${itemBlock}
+`;
+  }
+}
+
+async function copyItemPrompt(tool) {
+  const prompt = buildItemPrompt(tool);
+  if (!prompt) {
+    showNotice('Open an existing item to generate a prompt.', 'error');
+    return;
+  }
+  await navigator.clipboard.writeText(prompt);
+  const label = tool === 'claude-code' ? 'Claude Code' : 'Codex';
+  showNotice(`${label} prompt copied to clipboard!`);
 }
 
 async function submitItemForm(e) {
@@ -919,6 +1011,8 @@ function wire() {
     const id = document.getElementById('itemForm')?.dataset.id;
     if (id) deleteItem(id);
   });
+  document.getElementById('genClaudeCodePromptBtn')?.addEventListener('click', () => copyItemPrompt('claude-code'));
+  document.getElementById('genCodexPromptBtn')?.addEventListener('click', () => copyItemPrompt('codex'));
 
   // Release view static buttons
   document.getElementById('newReleaseBtn')?.addEventListener('click', () => openNewReleaseModal(state.selectedIds));
